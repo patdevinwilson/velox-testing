@@ -1,0 +1,69 @@
+# Example Terraform Configuration with HMS for External S3 Tables
+# Copy this to ../terraform.tfvars and customize
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  AWS Configuration
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+aws_region   = "us-east-1"
+key_name     = "rapids-db-io"     # AWS keypair name (without .pem extension)
+cluster_name = "velox-presto"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  Cluster Size
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Options: test, small, medium, large, xlarge, xxlarge
+cluster_size = "large"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  Presto Native Image (Built by velox-testing)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+presto_native_image_source = "s3://rapids-db-io-us-east-1/docker-images/presto-native-full.tar.gz"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  TPC-H Benchmark Configuration (available: 100, 1000, 3000)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+benchmark_scale_factor = "3000"                   # SF3000 = 3TB dataset
+s3_tpch_bucket         = "rapids-db-io-us-east-1" # S3 bucket name (no s3:// prefix)
+s3_tpch_prefix         = "tpch"                   # S3 path: s3://rapids-db-io-us-east-1/tpch/sf3000/
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  Hive Metastore Service (HMS) - For External S3 Tables
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Enable HMS for production S3 parquet file access
+enable_hms = true
+
+# HMS Database Configuration
+hms_db_instance_class = "db.t3.medium"            # RDS instance type
+hms_db_password       = "ChangeMe123!"            # Strong password required
+
+# With HMS enabled, you can create external tables:
+# CREATE EXTERNAL TABLE customer (...) 
+# STORED AS PARQUET
+# LOCATION 's3://rapids-db-io-us-east-1/tpch/sf3000/customer/';
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  AWS Credentials (for S3 and EC2)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Option 1: Use AWS_PROFILE environment variable
+#   export AWS_PROFILE=your-profile
+#   terraform apply
+
+# Option 2: Specify credentials (from nvsec or aws configure)
+# aws_access_key_id     = "ASIA..."
+# aws_secret_access_key = "..."
+# aws_session_token     = "..."
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  Optional Settings
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+create_build_instance = false
+auto_run_benchmark    = false
+enable_status_reporting = true
+

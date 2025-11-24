@@ -1,0 +1,62 @@
+# Example Terraform Configuration for AWS Presto Deployment
+# Copy this file to ../terraform.tfvars and customize
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  AWS Configuration
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+aws_region   = "us-east-1"
+key_name     = "your-ssh-key"     # AWS keypair name (without .pem extension)
+cluster_name = "velox-presto"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  Cluster Size
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Options: test, small, medium, large, xlarge, xxlarge
+cluster_size = "small"
+
+# Or override manually:
+# coordinator_instance_type = "c7a.4xlarge"
+# worker_instance_type      = "c7a.4xlarge"
+# worker_count              = 2
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  Presto Native Image (Built by velox-testing)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Use image from S3 (pre-built by ../../../scripts/start_native_cpu_presto.sh)
+presto_native_image_source = "s3://rapids-db-io-us-east-1/docker-images/presto-native-full.tar.gz"
+
+# Or build and upload:
+#   cd ../../../scripts
+#   ./start_native_cpu_presto.sh
+#   docker save presto-native-cpu:latest | gzip > /tmp/presto-native.tar.gz
+#   aws s3 cp /tmp/presto-native.tar.gz s3://your-bucket/docker-images/
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  TPC-H Benchmark Configuration
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+benchmark_scale_factor = "100"                      # SF100 = 100GB dataset
+s3_tpch_bucket         = "rapids-db-io-us-east-1"   # S3 bucket name (no s3:// prefix)
+s3_tpch_prefix         = "tpch"                     # Path prefix in bucket
+
+# Full path: s3://rapids-db-io-us-east-1/tpch/sf100/
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  AWS Credentials
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Option 1: Use AWS_PROFILE environment variable
+#   export AWS_PROFILE=your-profile
+#   terraform apply
+
+# Option 2: Specify credentials here (temporary tokens expire in ~1 hour)
+aws_access_key_id     = "ASIA..."
+aws_secret_access_key = "..."
+aws_session_token     = "..."
+
+# Note: These are passed to EC2 instances for S3 access only
+#       Terraform uses AWS_PROFILE or these credentials
+

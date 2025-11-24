@@ -1,0 +1,18 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# Sensitive credentials
+terraform.tfvars
+*.tfvars.bak
+
+# Runtime/temporary files
+.deployment_status.json
+deployment_outputs.json
+*.log
+
+# OS files
+.DS_Store
+
