@@ -200,7 +200,28 @@ EOF
 
 # config.properties (dynamically sized)
 # Get coordinator IP from EC2 metadata for correct routing
-COORDINATOR_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4 || hostname -I | awk '{print $1}')
+# Retry if needed since metadata might not be immediately available
+COORDINATOR_IP=""
+for i in {1..10}; do
+  COORDINATOR_IP=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/local-ipv4 2>/dev/null)
+  if [ -n "$COORDINATOR_IP" ]; then
+    break
+  fi
+  sleep 1
+done
+
+# Fallback to hostname if metadata unavailable
+if [ -z "$COORDINATOR_IP" ]; then
+  COORDINATOR_IP=$(hostname -I | awk '{print $1}')
+fi
+
+# Verify we have a valid IP
+if [ -z "$COORDINATOR_IP" ]; then
+  echo "ERROR: Could not determine coordinator IP"
+  exit 1
+fi
+
+echo "Coordinator IP: $COORDINATOR_IP"
 
 # Calculate heap headroom BEFORE creating config file
 HEAP_HEADROOM_GB=$((JVM_HEAP_GB * 40 / 100))

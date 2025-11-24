@@ -230,7 +230,21 @@ EOF
 # Get worker IP from EC2 metadata (not Docker internal IP)
 # Using hostname -I gives Docker bridge IP when inside container
 # EC2 metadata gives the actual host private IP
-WORKER_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4 || hostname -I | awk '{print $1}')
+WORKER_IP=""
+for i in {1..10}; do
+  WORKER_IP=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/local-ipv4 2>/dev/null)
+  if [ -n "$WORKER_IP" ]; then
+    break
+  fi
+  sleep 1
+done
+
+# Fallback
+if [ -z "$WORKER_IP" ]; then
+  WORKER_IP=$(hostname -I | awk '{print $1}')
+fi
+
+echo "Worker IP: $WORKER_IP"
 
 # config.properties (WORKER MODE)
 # Note: Presto Native has different config property names than Java
