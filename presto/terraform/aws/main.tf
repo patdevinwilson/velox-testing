@@ -123,9 +123,6 @@ module "hms" {
 
 # Coordinator Instance
 resource "aws_instance" "coordinator" {
-  # Don't deploy cluster when in build-only mode
-  count = var.presto_native_deployment == "build" ? 0 : 1
-
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = local.final_coordinator_type
   key_name               = var.key_name
@@ -169,8 +166,7 @@ resource "aws_instance" "coordinator" {
 
 # Worker Instances
 resource "aws_instance" "workers" {
-  # Don't deploy workers when in build-only mode  
-  count                  = var.presto_native_deployment == "build" ? 0 : local.final_worker_count
+  count                  = local.final_worker_count
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = local.final_worker_type
   key_name               = var.key_name
