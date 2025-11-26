@@ -14,6 +14,11 @@ date
 dnf update -y
 dnf install -y --allowerasing git docker gcc-c++ make cmake python3 wget curl awscli
 
+# Install Java 17 for Presto Java build (required by newer Presto versions)
+dnf install -y java-17-amazon-corretto java-17-amazon-corretto-devel
+export JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto
+echo "export JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto" >> /etc/profile.d/java17.sh
+
 # Start Docker
 systemctl start docker
 systemctl enable docker
@@ -55,8 +60,13 @@ sudo -u ec2-user git clone -b IBM-techpreview https://github.com/rapidsai/velox.
 
 wait
 
+# CRITICAL: Lock both to exact commits for protocol matching
 cd presto && sudo -u ec2-user git checkout 92865fbce0 && cd ..
 cd velox && sudo -u ec2-user git checkout 65797d572e && cd ..
+
+echo "✓ Repositories at exact commits:"
+echo "  Presto: 92865fbce0 (Nov 12, 2024)"
+echo "  Velox: 65797d572e (Nov 17, 2024)"
 
 echo "✓ Repositories ready"
 
