@@ -50,17 +50,33 @@ This script will:
 **Command-line options (native image workflow):**
 
 ```bash
-# Provision a build instance that compiles Presto Native
+# Option 1: Build from source (recommended for protocol-matched images)
 ./deploy_presto.sh --native-mode build
 
-# Use a pre-built image stored in S3/ECR
+# This deploys a build instance, then SSH and run:
+#   cd velox-testing/presto/scripts
+#   ./build_centos_deps_image.sh  # 30-60 min
+#   ./start_native_cpu_presto.sh --build all  # 20-30 min
+# Images are auto-uploaded to S3, then redeploy cluster
+
+# Option 2: Use pre-built images from S3 (faster, may have compatibility issues)
 ./deploy_presto.sh --native-mode prebuilt \
   --prebuilt-image s3://rapids-db-io-us-east-1/docker-images/presto-native-full.tar.gz
 ```
 
-Flags set the following Terraform variables automatically:
-- `--native-mode build` ⇒ `create_build_instance=true`, `presto_native_deployment="build"`
-- `--native-mode prebuilt` ⇒ `create_build_instance=false`, `presto_native_deployment="pull"`, `presto_native_image_source=<URI>`
+**Why Build from Source?**
+- Ensures coordinator and workers use same Presto commit
+- Eliminates protocol mismatches (`scaleWriters`, `$hashvalue` errors)
+- Enables all 22 TPC-H queries to work
+
+**When to Use Prebuilt?**
+- Fast deployment for testing
+- Acceptable for simple aggregation queries
+- May fail on complex joins due to version mismatch
+
+Flags set the following Terraform variables:
+- `--native-mode build` ⇒ `create_build_instance=true`, deploys build instance in default VPC with internet access
+- `--native-mode prebuilt` ⇒ `create_build_instance=false`, uses S3 images directly
 
 ### 2. Manual Deployment
 

@@ -65,15 +65,36 @@ print_usage() {
     cat <<EOF
 Usage: $0 [OPTIONS]
 
-Optional flags:
-  --native-mode build           Create a native build instance (presto_native_deployment=build)
-  --native-mode prebuilt        Use a prebuilt image (requires --prebuilt-image)
-  --prebuilt-image <URI>        S3 or registry URI for the native worker image
+Presto Native Worker Image Options:
+  --native-mode build           Deploy a build instance to compile from source
+                                (Recommended for protocol-matched images)
+  --native-mode prebuilt        Use prebuilt S3 images (requires --prebuilt-image)
+  --prebuilt-image <URI>        S3 URI for prebuilt worker image
+  
+Other Options:
   -h, --help                    Show this help text
 
+Build Instance Workflow:
+  1. Deploy with --native-mode build
+  2. SSH to build instance and run:
+     cd velox-testing/presto/scripts
+     ./build_centos_deps_image.sh  # 30-60 min
+     ./start_native_cpu_presto.sh --build all  # 20-30 min
+  3. Images are saved and uploaded to S3 automatically
+  4. Redeploy cluster with matched images
+
+Prebuilt Workflow:
+  1. Use existing S3 images (faster, may have protocol mismatch)
+  2. Deploy with --native-mode prebuilt --prebuilt-image <S3-URI>
+
 Examples:
+  # Build from source (protocol-matched, recommended)
   $0 --native-mode build
-  $0 --native-mode prebuilt --prebuilt-image s3://bucket/docker-images/presto-native.tar.gz
+
+  # Use prebuilt images from S3 (faster deployment)
+  $0 --native-mode prebuilt \\
+    --prebuilt-image s3://rapids-db-io-us-east-1/docker-images/presto-native-full.tar.gz
+
 EOF
 }
 
