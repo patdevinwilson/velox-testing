@@ -113,7 +113,10 @@ docker run --rm \
   -w /presto \
   presto/prestissimo-dependency:centos9 \
   bash -c "
-    make cmake-and-build BUILD_TYPE=release NUM_THREADS=32
+    make cmake-and-build \
+      BUILD_TYPE=release \
+      NUM_THREADS=32 \
+      EXTRA_CMAKE_FLAGS='-DVELOX_ENABLE_S3=ON -DVELOX_ENABLE_HDFS=ON -DPRESTO_ENABLE_PARQUET=ON'
     find . -name presto_server -type f -exec cp {} /output/ \;
     mkdir -p /output/libs
     ldd /output/presto_server 2>/dev/null | awk 'NF == 4 { system(\"cp -L \" \\\$3 \" /output/libs/\") }'
@@ -161,11 +164,21 @@ echo ""
 echo "[$(date +%H:%M:%S)] Step 5/5: Uploading to S3"
 cd ~
 
-docker save presto-coordinator:latest | gzip > presto-coordinator-matched.tar.gz
-docker save presto-native-worker-cpu:latest | gzip > presto-worker-matched.tar.gz
+# Create timestamped filenames
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+COORD_FILE="presto-coordinator-matched-$${TIMESTAMP}.tar.gz"
+WORKER_FILE="presto-worker-matched-$${TIMESTAMP}.tar.gz"
 
-aws s3 cp presto-coordinator-matched.tar.gz s3://rapids-db-io-us-east-1/docker-images/
-aws s3 cp presto-worker-matched.tar.gz s3://rapids-db-io-us-east-1/docker-images/
+docker save presto-coordinator:latest | gzip > $$COORD_FILE
+docker save presto-native-worker-cpu:latest | gzip > $$WORKER_FILE
+
+# Upload with timestamp
+aws s3 cp $$COORD_FILE s3://rapids-db-io-us-east-1/docker-images/
+aws s3 cp $$WORKER_FILE s3://rapids-db-io-us-east-1/docker-images/
+
+# Also upload as "latest" for easy reference
+aws s3 cp $$COORD_FILE s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-matched-latest.tar.gz
+aws s3 cp $$WORKER_FILE s3://rapids-db-io-us-east-1/docker-images/presto-worker-matched-latest.tar.gz
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -174,10 +187,18 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Completed: $(date)"
 echo ""
 echo "Images with S3A support uploaded to S3:"
-echo "  - presto-coordinator-matched.tar.gz"
-echo "  - presto-worker-matched.tar.gz"
+echo "  Timestamped:"
+echo "    - s3://rapids-db-io-us-east-1/docker-images/$$COORD_FILE"
+echo "    - s3://rapids-db-io-us-east-1/docker-images/$$WORKER_FILE"
+echo "  Latest (symlinks):"
+echo "    - s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-matched-latest.tar.gz"
+echo "    - s3://rapids-db-io-us-east-1/docker-images/presto-worker-matched-latest.tar.gz"
 echo ""
-echo "Protocol-matched + S3A filesystem support!"
+echo "Features:"
+echo "  ✅ Protocol-matched (Presto commit 92865fbce0)"
+echo "  ✅ Velox S3 support enabled (VELOX_ENABLE_S3=ON)"
+echo "  ✅ Hadoop S3A libraries included"
+echo "  ✅ Ready for AWS Glue + S3 parquet!"
 EOFAUTO
 
 chmod +x /home/ec2-user/auto_build_s3a.sh
