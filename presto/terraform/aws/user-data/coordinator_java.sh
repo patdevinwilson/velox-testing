@@ -59,7 +59,7 @@ mkdir -p /var/presto/data /var/presto/catalog /opt/hms/conf
 
 # Download Presto Coordinator Docker image from S3
 echo "Downloading Presto Coordinator image from S3..."
-COORDINATOR_IMAGE_SOURCE="s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-latest.tar.gz"
+COORDINATOR_IMAGE_SOURCE="s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-matched-latest.tar.gz"
 IMAGE_FILE="/tmp/presto-coordinator.tar.gz"
 
 export AWS_ACCESS_KEY_ID="${aws_access_key_id}"
