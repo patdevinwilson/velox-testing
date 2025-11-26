@@ -49,17 +49,38 @@ This script will:
 
 **Command-line options (native image workflow):**
 
+### **Two-Step Process for Custom Builds:**
+
+**Step 1: Deploy Build Instance**
 ```bash
-# Option 1: Build from source (recommended for protocol-matched images)
 ./deploy_presto.sh --native-mode build
+```
 
-# This deploys a build instance, then SSH and run:
-#   cd velox-testing/presto/scripts
-#   ./build_centos_deps_image.sh  # 30-60 min
-#   ./start_native_cpu_presto.sh --build all  # 20-30 min
-# Images are auto-uploaded to S3, then redeploy cluster
+This deploys **ONLY the build instance** (no cluster). Then SSH and build:
 
-# Option 2: Use pre-built images from S3 (faster, may have compatibility issues)
+```bash
+# Get build instance IP from output
+ssh -i ~/.ssh/rapids-db-io.pem ec2-user@<build-instance-ip>
+
+# Run automated build (~90 minutes)
+./auto_build_s3a.sh
+
+# Images auto-upload to S3 with timestamps:
+#   presto-coordinator-matched-YYYYMMDD-HHMMSS.tar.gz
+#   presto-worker-matched-YYYYMMDD-HHMMSS.tar.gz
+#   presto-*-matched-latest.tar.gz (symlinks)
+```
+
+**Step 2: Deploy Cluster with Built Images**
+```bash
+./deploy_presto.sh --native-mode prebuilt \
+  --prebuilt-image s3://rapids-db-io-us-east-1/docker-images/presto-worker-matched-latest.tar.gz
+```
+
+### **Quick Start with Existing Images:**
+
+```bash
+# Use pre-built images from S3 (faster, existing S3 support)
 ./deploy_presto.sh --native-mode prebuilt \
   --prebuilt-image s3://rapids-db-io-us-east-1/docker-images/presto-native-full.tar.gz
 ```
