@@ -143,7 +143,10 @@ module "hms" {
 }
 
 # Coordinator Instance
+# Skip if in build-only mode (presto_native_deployment = "build" or build_arm64 = true)
 resource "aws_instance" "coordinator" {
+  count = (var.presto_native_deployment == "build" || var.build_arm64) ? 0 : 1
+  
   ami                    = local.is_arm64 ? data.aws_ami.amazon_linux_2023_arm64.id : data.aws_ami.amazon_linux_2023.id
   instance_type          = local.final_coordinator_type
   key_name               = var.key_name
@@ -186,8 +189,9 @@ resource "aws_instance" "coordinator" {
 }
 
 # Worker Instances
+# Skip if in build-only mode (presto_native_deployment = "build" or build_arm64 = true)
 resource "aws_instance" "workers" {
-  count                  = local.final_worker_count
+  count                  = (var.presto_native_deployment == "build" || var.build_arm64) ? 0 : local.final_worker_count
   ami                    = local.is_arm64 ? data.aws_ami.amazon_linux_2023_arm64.id : data.aws_ami.amazon_linux_2023.id
   instance_type          = local.final_worker_type
   key_name               = var.key_name
@@ -214,7 +218,7 @@ resource "aws_instance" "workers" {
   # OPTION 2: Presto Native Workers (High Performance, Stable Build)
   user_data = templatefile("${path.module}/user-data/worker_native.sh", {
     cluster_name           = var.cluster_name
-    coordinator_ip         = aws_instance.coordinator.private_ip
+    coordinator_ip         = aws_instance.coordinator[0].private_ip
     worker_id              = count.index
     aws_access_key_id      = var.aws_access_key_id
     aws_secret_access_key  = var.aws_secret_access_key
@@ -222,7 +226,7 @@ resource "aws_instance" "workers" {
     presto_native_image    = var.presto_native_image_source
     benchmark_scale_factor = var.benchmark_scale_factor
     enable_hms             = var.enable_hms
-    hive_metastore_uri     = var.enable_hms ? format("thrift://%s:9083", aws_instance.coordinator.private_ip) : ""
+    hive_metastore_uri     = var.enable_hms ? format("thrift://%s:9083", aws_instance.coordinator[0].private_ip) : ""
   })
 
   tags = {

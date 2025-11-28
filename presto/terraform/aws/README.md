@@ -20,7 +20,6 @@ Deploy Presto clusters with Java coordinator and Native (Velox) workers on AWS.
 ### Deploy Cluster
 
 ```bash
-cd velox-testing/presto/terraform/aws
 
 # Show all options
 ./deploy_cluster.sh --help

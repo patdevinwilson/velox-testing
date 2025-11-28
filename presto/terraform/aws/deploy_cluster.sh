@@ -33,6 +33,7 @@ mkdir -p "${LOG_DIR}"
 CLUSTER_SIZE="medium"
 SCALE_FACTOR="100"
 BUILD_IMAGES=false
+BUILD_ARM64=false
 AUTO_BENCHMARK=true
 STREAM_LOGS=true
 WORKER_COUNT=""
@@ -65,7 +66,8 @@ Options:
   --instance <type>     Override worker instance type (e.g., r7i.8xlarge)
   
   --benchmark <sf>      TPC-H scale factor: 100, 1000, 3000 (default: 100)
-  --build               Build fresh images before deployment
+  --build               Build fresh x86 images before deployment
+  --build-arm64         Build fresh ARM64 (Graviton) images
   --no-benchmark        Skip automatic benchmark after deployment
   --no-stream           Don't stream build logs (just show progress)
   
@@ -81,10 +83,13 @@ Examples:
   # Custom instance type and count
   $0 --workers 8 --instance r7i.24xlarge --benchmark 3000
 
-  # Build fresh images and deploy large cluster
+  # Build fresh x86 images and deploy large cluster
   $0 --build --size large --benchmark 3000
 
-  # Deploy Graviton cluster (cost-effective)
+  # Build ARM64 images for Graviton
+  $0 --build-arm64
+
+  # Deploy Graviton cluster (cost-effective) with prebuilt images
   $0 --size graviton-medium --benchmark 1000
 
 EOF
@@ -98,6 +103,7 @@ parse_args() {
             --instance) WORKER_INSTANCE_TYPE="$2"; shift 2 ;;
             --benchmark) SCALE_FACTOR="$2"; shift 2 ;;
             --build) BUILD_IMAGES=true; shift ;;
+            --build-arm64) BUILD_ARM64=true; shift ;;
             --no-benchmark) AUTO_BENCHMARK=false; shift ;;
             --no-stream) STREAM_LOGS=false; shift ;;
             -h|--help) print_usage; exit 0 ;;
@@ -176,21 +182,37 @@ update_tfvars() {
     fi
     
     # Set deployment mode
-    if [ "${BUILD_IMAGES}" = true ]; then
-        sed -i.bak "s/^presto_native_deployment.*$/presto_native_deployment = \"build\"/" "${TFVARS_FILE}" 2>/dev/null || \
-            echo 'presto_native_deployment = "build"' >> "${TFVARS_FILE}"
-        sed -i.bak "s/^create_build_instance.*$/create_build_instance = true/" "${TFVARS_FILE}" 2>/dev/null || \
-            echo 'create_build_instance = true' >> "${TFVARS_FILE}"
-    else
+    if [ "${BUILD_ARM64}" = true ]; then
+        # ARM64 build mode - only deploy build instance
+        sed -i.bak "s/^build_arm64.*$/build_arm64 = true/" "${TFVARS_FILE}" 2>/dev/null || \
+            echo 'build_arm64 = true' >> "${TFVARS_FILE}"
         sed -i.bak "s/^presto_native_deployment.*$/presto_native_deployment = \"pull\"/" "${TFVARS_FILE}" 2>/dev/null || \
             echo 'presto_native_deployment = "pull"' >> "${TFVARS_FILE}"
         sed -i.bak "s/^create_build_instance.*$/create_build_instance = false/" "${TFVARS_FILE}" 2>/dev/null || \
             echo 'create_build_instance = false' >> "${TFVARS_FILE}"
+        log "  Mode: ARM64 (Graviton) build - only build instance"
+    elif [ "${BUILD_IMAGES}" = true ]; then
+        # x86 build mode
+        sed -i.bak "s/^build_arm64.*$/build_arm64 = false/" "${TFVARS_FILE}" 2>/dev/null || \
+            echo 'build_arm64 = false' >> "${TFVARS_FILE}"
+        sed -i.bak "s/^presto_native_deployment.*$/presto_native_deployment = \"build\"/" "${TFVARS_FILE}" 2>/dev/null || \
+            echo 'presto_native_deployment = "build"' >> "${TFVARS_FILE}"
+        sed -i.bak "s/^create_build_instance.*$/create_build_instance = true/" "${TFVARS_FILE}" 2>/dev/null || \
+            echo 'create_build_instance = true' >> "${TFVARS_FILE}"
+        log "  Mode: x86 build"
+    else
+        # Pull prebuilt images
+        sed -i.bak "s/^build_arm64.*$/build_arm64 = false/" "${TFVARS_FILE}" 2>/dev/null || \
+            echo 'build_arm64 = false' >> "${TFVARS_FILE}"
+        sed -i.bak "s/^presto_native_deployment.*$/presto_native_deployment = \"pull\"/" "${TFVARS_FILE}" 2>/dev/null || \
+            echo 'presto_native_deployment = "pull"' >> "${TFVARS_FILE}"
+        sed -i.bak "s/^create_build_instance.*$/create_build_instance = false/" "${TFVARS_FILE}" 2>/dev/null || \
+            echo 'create_build_instance = false' >> "${TFVARS_FILE}"
+        log "  Mode: Pull prebuilt images"
     fi
     
     log "  Cluster size: ${CLUSTER_SIZE}"
     log "  Scale factor: SF${SCALE_FACTOR}"
-    log "  Build images: ${BUILD_IMAGES}"
 }
 
 stream_build_logs() {
@@ -376,7 +398,8 @@ main() {
     echo -e "${BLUE}Configuration:${NC}"
     echo "  Cluster size:    ${CLUSTER_SIZE}"
     echo "  Scale factor:    SF${SCALE_FACTOR}"
-    echo "  Build images:    ${BUILD_IMAGES}"
+    echo "  Build x86:       ${BUILD_IMAGES}"
+    echo "  Build ARM64:     ${BUILD_ARM64}"
     echo "  Auto benchmark:  ${AUTO_BENCHMARK}"
     echo ""
     
@@ -394,7 +417,28 @@ main() {
     
     cd "${SCRIPT_DIR}"
     
-    # Handle build mode
+    # Handle ARM64 build mode
+    if [ "${BUILD_ARM64}" = true ]; then
+        BUILD_IP=$(terraform output -raw build_arm64_ip 2>/dev/null || echo "")
+        
+        if [ -n "${BUILD_IP}" ] && [ "${BUILD_IP}" != "N/A" ]; then
+            log "ARM64 build instance: ${BUILD_IP}"
+            wait_for_build "${BUILD_IP}"
+            
+            log "✓ ARM64 images uploaded to S3:"
+            log "  s3://rapids-db-io-us-east-1/docker-images/presto-worker-arm64-latest.tar.gz"
+            log "  s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-arm64-latest.tar.gz"
+            log ""
+            log "To deploy Graviton cluster with these images:"
+            log "  $0 --size graviton-medium --benchmark 3000"
+            exit 0
+        else
+            log_error "ARM64 build instance not found"
+            exit 1
+        fi
+    fi
+    
+    # Handle x86 build mode
     if [ "${BUILD_IMAGES}" = true ]; then
         BUILD_IP=$(terraform output -raw build_instance_public_ip 2>/dev/null || echo "")
         

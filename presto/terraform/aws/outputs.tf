@@ -1,11 +1,11 @@
 output "coordinator_public_ip" {
   description = "Public IP of coordinator"
-  value       = aws_instance.coordinator.public_ip
+  value       = length(aws_instance.coordinator) > 0 ? aws_instance.coordinator[0].public_ip : "N/A (build mode)"
 }
 
 output "coordinator_private_ip" {
   description = "Private IP of coordinator"
-  value       = aws_instance.coordinator.private_ip
+  value       = length(aws_instance.coordinator) > 0 ? aws_instance.coordinator[0].private_ip : "N/A (build mode)"
 }
 
 output "worker_public_ips" {
@@ -20,12 +20,12 @@ output "worker_private_ips" {
 
 output "presto_ui_url" {
   description = "Presto Web UI URL"
-  value       = "http://${aws_instance.coordinator.public_ip}:8080"
+  value       = length(aws_instance.coordinator) > 0 ? "http://${aws_instance.coordinator[0].public_ip}:8080" : "N/A (build mode)"
 }
 
 output "ssh_coordinator" {
   description = "SSH command for coordinator"
-  value       = "ssh -i ~/.ssh/${var.key_name}.pem ec2-user@${aws_instance.coordinator.public_ip}"
+  value       = length(aws_instance.coordinator) > 0 ? "ssh -i ~/.ssh/${var.key_name}.pem ec2-user@${aws_instance.coordinator[0].public_ip}" : "N/A (build mode)"
 }
 
 output "ssh_workers" {
@@ -45,6 +45,5 @@ output "hms_db_endpoint" {
 
 output "hive_metastore_uri" {
   description = "Thrift URI for Hive Metastore"
-  value       = var.enable_hms ? "thrift://${aws_instance.coordinator.private_ip}:9083" : "file-based"
+  value       = var.enable_hms && length(aws_instance.coordinator) > 0 ? "thrift://${aws_instance.coordinator[0].private_ip}:9083" : "file-based"
 }
-
