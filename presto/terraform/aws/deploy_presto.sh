@@ -255,15 +255,26 @@ configure_deployment() {
     echo -e "${BLUE}  Select Cluster Size${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo "1) test      - 1x t3.large workers        (~\$0.42/hr)  - Quick testing"
-    echo "2) small     - 2x r7i.2xlarge workers     (~\$1.26/hr)  - Small demos & dev"
-    echo "3) medium    - 4x r7i.4xlarge workers     (~\$4.80/hr)  - Medium workloads"
-    echo "4) large     - 8x r7i.8xlarge workers     (~\$19.20/hr) - Large production"
-    echo "5) xlarge    - 16x r7i.16xlarge workers   (~\$34/hr)    - XLarge production"
-    echo "6) xxlarge   - 32x r7i.16xlarge workers   (~\$50/hr)    - XXLarge production"
+    echo -e "${YELLOW}x86 (Intel r7i):${NC}"
+    echo "  1) test      - 1x r7i.xlarge     32GB   (~\$0.42/hr)  - Quick testing"
+    echo "  2) small     - 2x r7i.2xlarge    64GB   (~\$1.26/hr)  - Small demos"
+    echo "  3) medium    - 4x r7i.8xlarge    256GB  (~\$9/hr)     - Benchmarks"
+    echo "  4) large     - 4x r7i.16xlarge   512GB  (~\$17/hr)    - Large benchmarks"
+    echo "  5) xlarge    - 8x r7i.16xlarge   512GB  (~\$34/hr)    - High performance"
+    echo "  6) xxlarge   - 8x r7i.24xlarge   768GB  (~\$50/hr)    - Maximum performance"
     echo ""
-    read -p "Select cluster size [1-6] (default: 2): " CLUSTER_SIZE_CHOICE
-    CLUSTER_SIZE_CHOICE=${CLUSTER_SIZE_CHOICE:-2}
+    echo -e "${YELLOW}ARM (Graviton r7gd with NVMe SSD cache):${NC}"
+    echo "  7) graviton-small  - 2x r7gd.2xlarge   64GB+474GB   (~\$1.28/hr)"
+    echo "  8) graviton-medium - 4x r7gd.4xlarge   128GB+950GB  (~\$4.69/hr)"
+    echo "  9) graviton-large  - 4x r7gd.8xlarge   256GB+1.9TB  (~\$9.38/hr)"
+    echo " 10) graviton-xlarge - 8x r7gd.16xlarge  512GB+3.8TB  (~\$35/hr)"
+    echo ""
+    echo -e "${YELLOW}Cost-Optimized (best \$/benchmark):${NC}"
+    echo " 11) cost-small  - 32x r7i.2xlarge  (~\$16/hr, ~\$5/run)"
+    echo " 12) cost-medium - 16x r7i.4xlarge  (~\$17/hr, ~\$6/run)"
+    echo ""
+    read -p "Select cluster size [1-12] (default: 3): " CLUSTER_SIZE_CHOICE
+    CLUSTER_SIZE_CHOICE=${CLUSTER_SIZE_CHOICE:-3}
     
     case ${CLUSTER_SIZE_CHOICE} in
         1) CLUSTER_SIZE="test" ;;
@@ -272,7 +283,13 @@ configure_deployment() {
         4) CLUSTER_SIZE="large" ;;
         5) CLUSTER_SIZE="xlarge" ;;
         6) CLUSTER_SIZE="xxlarge" ;;
-        *) log_warning "Invalid choice, defaulting to small"; CLUSTER_SIZE="small" ;;
+        7) CLUSTER_SIZE="graviton-small" ;;
+        8) CLUSTER_SIZE="graviton-medium" ;;
+        9) CLUSTER_SIZE="graviton-large" ;;
+        10) CLUSTER_SIZE="graviton-xlarge" ;;
+        11) CLUSTER_SIZE="cost-optimized-small" ;;
+        12) CLUSTER_SIZE="cost-optimized-medium" ;;
+        *) log_warning "Invalid choice, defaulting to medium"; CLUSTER_SIZE="medium" ;;
     esac
     
     # TPC-H scale factor selection

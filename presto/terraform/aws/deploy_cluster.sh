@@ -35,6 +35,8 @@ SCALE_FACTOR="100"
 BUILD_IMAGES=false
 AUTO_BENCHMARK=true
 STREAM_LOGS=true
+WORKER_COUNT=""
+WORKER_INSTANCE_TYPE=""
 
 log() { echo -e "${GREEN}[$(date '+%H:%M:%S')]${NC} $1"; }
 log_info() { echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} $1"; }
@@ -59,6 +61,9 @@ Options:
                         ARM: graviton-small, graviton-medium, graviton-large, graviton-xlarge
                         Cost: cost-optimized-small, cost-optimized-medium
   
+  --workers <n>         Override number of worker nodes
+  --instance <type>     Override worker instance type (e.g., r7i.8xlarge)
+  
   --benchmark <sf>      TPC-H scale factor: 100, 1000, 3000 (default: 100)
   --build               Build fresh images before deployment
   --no-benchmark        Skip automatic benchmark after deployment
@@ -69,6 +74,12 @@ Options:
 Examples:
   # Quick deploy with prebuilt images
   $0 --size medium --benchmark 100
+
+  # Custom worker count
+  $0 --size medium --workers 16 --benchmark 3000
+
+  # Custom instance type and count
+  $0 --workers 8 --instance r7i.24xlarge --benchmark 3000
 
   # Build fresh images and deploy large cluster
   $0 --build --size large --benchmark 3000
@@ -83,6 +94,8 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --size) CLUSTER_SIZE="$2"; shift 2 ;;
+            --workers) WORKER_COUNT="$2"; shift 2 ;;
+            --instance) WORKER_INSTANCE_TYPE="$2"; shift 2 ;;
             --benchmark) SCALE_FACTOR="$2"; shift 2 ;;
             --build) BUILD_IMAGES=true; shift ;;
             --no-benchmark) AUTO_BENCHMARK=false; shift ;;
@@ -133,6 +146,26 @@ update_tfvars() {
         sed -i.bak "s/^cluster_size.*$/cluster_size = \"${CLUSTER_SIZE}\"/" "${TFVARS_FILE}"
     else
         echo "cluster_size = \"${CLUSTER_SIZE}\"" >> "${TFVARS_FILE}"
+    fi
+    
+    # Update worker_count if specified
+    if [ -n "${WORKER_COUNT}" ]; then
+        if grep -q "^worker_count" "${TFVARS_FILE}"; then
+            sed -i.bak "s/^worker_count.*$/worker_count = ${WORKER_COUNT}/" "${TFVARS_FILE}"
+        else
+            echo "worker_count = ${WORKER_COUNT}" >> "${TFVARS_FILE}"
+        fi
+        log "  Worker count: ${WORKER_COUNT} (override)"
+    fi
+    
+    # Update worker_instance_type if specified
+    if [ -n "${WORKER_INSTANCE_TYPE}" ]; then
+        if grep -q "^worker_instance_type" "${TFVARS_FILE}"; then
+            sed -i.bak "s/^worker_instance_type.*$/worker_instance_type = \"${WORKER_INSTANCE_TYPE}\"/" "${TFVARS_FILE}"
+        else
+            echo "worker_instance_type = \"${WORKER_INSTANCE_TYPE}\"" >> "${TFVARS_FILE}"
+        fi
+        log "  Worker instance: ${WORKER_INSTANCE_TYPE} (override)"
     fi
     
     # Update benchmark_scale_factor

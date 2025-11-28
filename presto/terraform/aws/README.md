@@ -22,51 +22,117 @@ Deploy Presto clusters with Java coordinator and Native (Velox) workers on AWS.
 ```bash
 cd velox-testing/presto/terraform/aws
 
-# Unified deployment (recommended)
-./deploy_cluster.sh --size medium --benchmark 100
+# Show all options
+./deploy_cluster.sh --help
 
-# Or interactive mode
-./deploy_cluster.sh
+# Deploy medium cluster with SF100 benchmark
+./deploy_cluster.sh --size medium --benchmark 100
 ```
 
-The script will:
-- Refresh AWS credentials
-- Deploy infrastructure with dynamic configs
-- Register TPC-H tables in Glue
-- Run ANALYZE TABLES for optimization
-- Execute all 22 TPC-H queries
-- Save results to CSV
+## Usage Examples
+
+### Basic Deployments
+
+```bash
+# Quick test cluster (1 worker, ~$0.42/hr)
+./deploy_cluster.sh --size test --benchmark 100
+
+# Medium cluster for benchmarks (4 workers, ~$9/hr)
+./deploy_cluster.sh --size medium --benchmark 1000
+
+# Large cluster for SF3000 (8 workers, ~$50/hr)
+./deploy_cluster.sh --size xxlarge --benchmark 3000
+```
+
+### Custom Worker Count
+
+```bash
+# 16 workers using medium instance type
+./deploy_cluster.sh --size medium --workers 16 --benchmark 3000
+
+# 8 large workers
+./deploy_cluster.sh --workers 8 --instance r7i.24xlarge --benchmark 3000
+
+# 32 small workers (cost-optimized)
+./deploy_cluster.sh --size cost-optimized-small --benchmark 3000
+```
+
+### Graviton (ARM) Clusters
+
+~15% cheaper with local NVMe SSD for caching.
+
+```bash
+# Medium Graviton cluster
+./deploy_cluster.sh --size graviton-medium --benchmark 1000
+
+# Large Graviton with custom worker count
+./deploy_cluster.sh --size graviton-large --workers 8 --benchmark 3000
+```
+
+**Note:** Graviton requires ARM64 images. Use `--build` to compile or ensure ARM64 images exist in S3.
 
 ### Build Fresh Images
 
 ```bash
-# Build images from source and deploy
+# Build images from source (~90 min) then deploy
 ./deploy_cluster.sh --build --size large --benchmark 3000
 
-# Build logs are streamed to your terminal
-# Total build time: ~90 minutes
+# Build with log streaming to terminal
+./deploy_cluster.sh --build --size medium
 ```
 
-### Access Cluster
+### Skip Benchmark
 
 ```bash
-# Get coordinator IP
-COORDINATOR_IP=$(terraform output -raw coordinator_public_ip)
-
-# SSH to coordinator
-ssh -i ~/.ssh/rapids-db-io.pem ec2-user@${COORDINATOR_IP}
-
-# Run queries
-presto --server localhost:8080 --catalog hive --schema tpch_sf100
-
-# Web UI
-open http://${COORDINATOR_IP}:8080
+# Deploy without running TPC-H queries
+./deploy_cluster.sh --size medium --no-benchmark
 ```
 
-### Destroy Cluster
+### Direct Terraform
 
 ```bash
-terraform destroy
+# Full control via terraform variables
+terraform apply \
+  -var="cluster_size=medium" \
+  -var="worker_count=16" \
+  -var="worker_instance_type=r7i.8xlarge" \
+  -var="benchmark_scale_factor=3000"
+```
+
+## Command Reference
+
+### deploy_cluster.sh
+
+```
+Usage: ./deploy_cluster.sh [OPTIONS]
+
+Options:
+  --size <size>         Cluster size preset (default: medium)
+                        x86: test, small, medium, large, xlarge, xxlarge
+                        ARM: graviton-small, graviton-medium, graviton-large, graviton-xlarge
+                        Cost: cost-optimized-small, cost-optimized-medium
+  
+  --workers <n>         Override number of worker nodes
+  --instance <type>     Override worker instance type (e.g., r7i.8xlarge)
+  
+  --benchmark <sf>      TPC-H scale factor: 100, 1000, 3000 (default: 100)
+  --build               Build fresh images before deployment
+  --no-benchmark        Skip automatic benchmark after deployment
+  --no-stream           Don't stream build logs (just show progress)
+  
+  -h, --help            Show this help
+```
+
+### deploy_presto.sh (Interactive)
+
+```
+Usage: ./deploy_presto.sh [OPTIONS]
+
+Options:
+  --native-mode build       Deploy build instance to compile from source
+  --native-mode prebuilt    Use prebuilt S3 images
+  --prebuilt-image <URI>    S3 URI for prebuilt worker image
+  -h, --help                Show this help
 ```
 
 ## Cluster Sizes
@@ -84,8 +150,6 @@ terraform destroy
 
 ### ARM (Graviton r7gd with NVMe)
 
-~15% cheaper than x86 with local SSD cache for better S3 performance.
-
 | Size | Workers | Instance | RAM/node | NVMe | Cost/hr |
 |------|---------|----------|----------|------|---------|
 | graviton-small | 2 | r7gd.2xlarge | 64GB | 474GB | ~$1.28 |
@@ -93,25 +157,12 @@ terraform destroy
 | graviton-large | 4 | r7gd.8xlarge | 256GB | 1.9TB | ~$9.38 |
 | graviton-xlarge | 8 | r7gd.16xlarge | 512GB | 3.8TB | ~$35 |
 
-**Note:** Graviton requires ARM64-compiled images. Use `--build` to compile.
-
 ### Cost-Optimized
-
-Best $/benchmark based on testing:
 
 | Size | Workers | Instance | Cost/hr | $/benchmark |
 |------|---------|----------|---------|-------------|
 | cost-optimized-small | 32 | r7i.2xlarge | ~$16 | ~$5/run |
 | cost-optimized-medium | 16 | r7i.4xlarge | ~$17 | ~$6/run |
-
-## Dynamic Configuration
-
-Worker and coordinator configs are automatically tuned based on instance size:
-
-- **Memory:** 95% of RAM allocated to Velox (workers), 90% to JVM (coordinator)
-- **Concurrency:** Scales with vCPU count and scale factor
-- **AsyncDataCache:** Auto-detects NVMe and configures SSD caching
-- **Buffer Memory:** Scales with scale factor (32GB for SF100, 100GB for SF3000)
 
 ## TPC-H Data
 
@@ -125,25 +176,43 @@ Pre-generated parquet data in S3:
 
 ## Configuration
 
-Edit `terraform.tfvars`:
+### terraform.tfvars
 
 ```hcl
-cluster_size           = "medium"   # See cluster sizes above
-benchmark_scale_factor = "100"      # 100, 1000, 3000
+# Cluster configuration
+cluster_size           = "medium"
+worker_count           = 8           # Override preset default
+worker_instance_type   = "r7i.8xlarge"  # Override preset default
 
-# Prebuilt images from S3
+# Benchmark
+benchmark_scale_factor = "3000"      # 100, 1000, 3000
+
+# Image source
 presto_native_deployment   = "pull"
 presto_native_image_source = "s3://rapids-db-io-us-east-1/docker-images/presto-worker-matched-latest.tar.gz"
 ```
 
-## Scripts Reference
+## Access Cluster
 
-| Script | Purpose |
-|--------|---------|
-| `deploy_cluster.sh` | **Main script** - build, deploy, benchmark |
-| `deploy_presto.sh` | Interactive deployment (legacy) |
-| `run_tpch_benchmark.sh` | Run TPC-H queries with CSV output |
-| `populate_tpch_from_s3_equivalent.sh` | Register S3 tables in Glue |
+```bash
+# Get coordinator IP
+COORDINATOR_IP=$(terraform output -raw coordinator_public_ip)
+
+# SSH to coordinator
+ssh -i ~/.ssh/rapids-db-io.pem ec2-user@${COORDINATOR_IP}
+
+# Run queries
+presto --server localhost:8080 --catalog hive --schema tpch_sf100
+
+# Web UI
+open http://${COORDINATOR_IP}:8080
+```
+
+## Destroy Cluster
+
+```bash
+terraform destroy
+```
 
 ## Troubleshooting
 
@@ -178,7 +247,8 @@ ssh ec2-user@<coordinator-ip> 'aws s3 ls s3://rapids-db-io-us-east-1/tpch/'
 
 ```
 aws/
-├── deploy_cluster.sh             # Main deployment script
+├── deploy_cluster.sh             # Main deployment script (recommended)
+├── deploy_presto.sh              # Interactive deployment
 ├── run_tpch_benchmark.sh         # Benchmark runner
 ├── populate_tpch_from_s3_equivalent.sh  # Table registration
 ├── lib/
@@ -186,12 +256,12 @@ aws/
 ├── main.tf                       # Infrastructure
 ├── variables.tf                  # Input variables
 ├── cluster_sizes.tf              # Cluster presets
-├── terraform.tfvars              # Configuration
+├── terraform.tfvars              # Configuration (gitignored)
 └── user-data/
     ├── coordinator_java.sh       # Coordinator setup
     ├── worker_native.sh          # Worker setup (x86)
-    ├── build_s3a_complete.sh     # Build script
-    └── build_arm64.sh            # ARM64 build script
+    ├── build_s3a_complete.sh     # Build script (x86)
+    └── build_arm64.sh            # Build script (ARM64)
 ```
 
 ## Prebuilt Images
