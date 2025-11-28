@@ -12,6 +12,15 @@ terraform.tfvars
 .deployment_status.json
 deployment_outputs.json
 *.log
+logs/
+
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Benchmark results (may contain timestamps/paths)
+*.csv
 
 # OS files
 .DS_Store

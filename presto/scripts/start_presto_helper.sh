@@ -123,11 +123,11 @@ if (( ${#BUILD_TARGET_ARG[@]} )); then
   fi
 
   echo "Building services: ${BUILD_TARGET_ARG[@]}"
-  docker compose --progress plain -f $DOCKER_COMPOSE_FILE_PATH build \
+  docker-compose -f $DOCKER_COMPOSE_FILE_PATH build \
   $SKIP_CACHE_ARG --build-arg PRESTO_VERSION=$PRESTO_VERSION \
   --build-arg NUM_THREADS=$NUM_THREADS --build-arg BUILD_TYPE=$BUILD_TYPE \
   --build-arg CUDA_ARCHITECTURES=$CUDA_ARCHITECTURES \
   ${BUILD_TARGET_ARG[@]}
 fi
 
-docker compose -f $DOCKER_COMPOSE_FILE_PATH up -d
+docker-compose -f $DOCKER_COMPOSE_FILE_PATH up -d

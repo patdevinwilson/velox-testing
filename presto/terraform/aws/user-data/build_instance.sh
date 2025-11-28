@@ -61,7 +61,11 @@ cd velox
 sudo -u ec2-user git checkout 65797d572e
 cd ..
 
-echo "✓ All repositories cloned at correct commits"
+cd velox-testing
+sudo -u ec2-user git checkout b7f0ace60e
+cd ..
+
+echo "✓ All repositories cloned at correct commits (Presto 92865fbce0, Velox 65797d572e, Velox Testing b7f0ace60e)"
 
 echo ""
 echo "=== Creating Build Scripts ==="
@@ -77,6 +81,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "Presto: commit 92865fbce0"
 echo "Velox: commit 65797d572e (IBM-techpreview)"
+echo "Velox Testing: commit b7f0ace60e (main)"
 echo ""
 
 cd ~/velox-testing/presto/scripts
@@ -156,7 +161,7 @@ Manual Steps:
 Total time: ~90 minutes
 
 Repositories are already cloned at:
-  - ~/velox-testing
+  - ~/velox-testing (commit b7f0ace60e)
   - ~/presto (commit 92865fbce0)
   - ~/velox (commit 65797d572e)
 

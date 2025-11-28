@@ -63,10 +63,12 @@ wait
 # CRITICAL: Lock both to exact commits for protocol matching
 cd presto && sudo -u ec2-user git checkout 92865fbce0 && cd ..
 cd velox && sudo -u ec2-user git checkout 65797d572e && cd ..
+cd velox-testing && sudo -u ec2-user git checkout b7f0ace60e && cd ..
 
 echo "✓ Repositories at exact commits:"
 echo "  Presto: 92865fbce0 (Nov 12, 2024)"
 echo "  Velox: 65797d572e (Nov 17, 2024)"
+echo "  Velox Testing: b7f0ace60e (Nov 20, 2024)"
 
 echo "✓ Repositories ready"
 
@@ -86,20 +88,14 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Started: $(date)"
 echo "  Presto: 92865fbce0"
 echo "  Velox: 65797d572e"
+echo "  Velox Testing: b7f0ace60e"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
 # === STEP 1: Build Dependency Image ===
 echo "[$(date +%H:%M:%S)] Step 1/5: Building dependency image (30-60 min)"
-cd ~/presto/presto-native-execution
-
-rm -rf velox
-mkdir -p velox
-cp -r ~/velox/scripts velox/
-cp -r ~/velox/CMake velox/
-
-cd ~/velox-testing
-docker-compose build centos-native-dependency
+cd ~/velox-testing/presto/scripts
+./build_centos_deps_image.sh
 
 echo "[$(date +%H:%M:%S)] ✓ Dependency image complete"
 
@@ -205,7 +201,7 @@ echo "    - s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-matched
 echo "    - s3://rapids-db-io-us-east-1/docker-images/presto-worker-matched-latest.tar.gz"
 echo ""
 echo "Features:"
-echo "  ✅ Protocol-matched (Presto commit 92865fbce0)"
+echo "  ✅ Protocol-matched (Presto 92865fbce0, Velox 65797d572e, Velox Testing b7f0ace60e)"
 echo "  ✅ Velox S3 support enabled (VELOX_ENABLE_S3=ON)"
 echo "  ✅ Hadoop S3A libraries included"
 echo "  ✅ Ready for AWS Glue + S3 parquet!"
@@ -235,7 +231,14 @@ Estimated time: 90 minutes
 INSTRUCTIONS
 
 echo "=== Build Instance Ready ===" 
-echo "Run: ./auto_build_s3a.sh"
+echo "Starting automated build..."
+echo ""
+
+# Auto-start the build in background
+sudo -u ec2-user nohup /home/ec2-user/auto_build_s3a.sh > /home/ec2-user/build_output.log 2>&1 &
+
+echo "Build started in background. Monitor with:"
+echo "  tail -f ~/build_progress.log"
 echo ""
 echo "User data script completed successfully"
 

@@ -139,7 +139,7 @@ SCALE_FACTOR=${benchmark_scale_factor}
 if [ "$SCALE_FACTOR" -ge 1000 ]; then
   TASK_CONCURRENCY=$((VCPUS * 6))
 else
-  TASK_CONCURRENCY=$((VCPUS * 4))
+TASK_CONCURRENCY=$((VCPUS * 4))
 fi
 
 # Bounds: min 8, max based on RAM (1 task per 2GB heap)
@@ -212,7 +212,7 @@ done
 
 # Fallback to hostname if metadata unavailable
 if [ -z "$COORDINATOR_IP" ]; then
-  COORDINATOR_IP=$(hostname -I | awk '{print $1}')
+COORDINATOR_IP=$(hostname -I | awk '{print $1}')
 fi
 
 # Verify we have a valid IP
@@ -270,6 +270,7 @@ EOF
 HIVE_PROPERTIES_FILE=/opt/presto/etc/catalog/hive.properties
 
 %{ if enable_hms }
+# HMS mode - use Thrift metastore
 cat > "$HIVE_PROPERTIES_FILE" << EOF
 connector.name=hive-hadoop2
 hive.metastore.uri=thrift://$COORDINATOR_IP:9083
@@ -282,18 +283,17 @@ hive.s3.max-connections=500
 hive.storage-format=PARQUET
 hive.compression-codec=SNAPPY
 hive.parquet.use-column-names=true
-hive.s3.aws-access-key=${aws_access_key_id}
-hive.s3.aws-secret-key=${aws_secret_access_key}
-hive.s3.session-token=${aws_session_token}
 
 hive.max-partitions-per-scan=100000
 hive.max-split-size=128MB
 EOF
 %{ else }
+# Default: Use AWS Glue Data Catalog for S3 external tables
+# Credentials are passed via environment variables to the container
 cat > "$HIVE_PROPERTIES_FILE" << 'HIVEEOF'
 connector.name=hive-hadoop2
-hive.metastore=file
-hive.metastore.catalog.dir=/var/presto/catalog
+hive.metastore=glue
+hive.metastore.glue.region=us-east-1
 
 hive.s3.endpoint=s3.us-east-1.amazonaws.com
 hive.s3.path-style-access=false

@@ -15,7 +15,7 @@ provider "aws" {
 # Note: IAM role creation disabled due to insufficient permissions
 # Using AWS credentials passed via user-data instead
 
-# Data source for latest Amazon Linux 2023 AMI
+# Data source for latest Amazon Linux 2023 AMI (x86_64)
 data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -28,6 +28,27 @@ data "aws_ami" "amazon_linux_2023" {
   filter {
     name   = "virtualization-type"
     values = ["hvm"]
+  }
+}
+
+# Data source for latest Amazon Linux 2023 AMI (ARM64/Graviton)
+data "aws_ami" "amazon_linux_2023_arm64" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-*-arm64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["arm64"]
   }
 }
 
@@ -123,7 +144,7 @@ module "hms" {
 
 # Coordinator Instance
 resource "aws_instance" "coordinator" {
-  ami                    = data.aws_ami.amazon_linux_2023.id
+  ami                    = local.is_arm64 ? data.aws_ami.amazon_linux_2023_arm64.id : data.aws_ami.amazon_linux_2023.id
   instance_type          = local.final_coordinator_type
   key_name               = var.key_name
   subnet_id              = aws_subnet.presto_subnet.id
@@ -167,7 +188,7 @@ resource "aws_instance" "coordinator" {
 # Worker Instances
 resource "aws_instance" "workers" {
   count                  = local.final_worker_count
-  ami                    = data.aws_ami.amazon_linux_2023.id
+  ami                    = local.is_arm64 ? data.aws_ami.amazon_linux_2023_arm64.id : data.aws_ami.amazon_linux_2023.id
   instance_type          = local.final_worker_type
   key_name               = var.key_name
   subnet_id              = aws_subnet.presto_subnet.id

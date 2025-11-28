@@ -2,7 +2,7 @@
 # This is a one-time instance to build the Docker image on Linux
 
 resource "aws_instance" "build_instance" {
-  count = var.create_build_instance ? 1 : 0
+  count = (var.create_build_instance && var.enable_legacy_build_instance) ? 1 : 0
 
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = "c7i.4xlarge"  # 16 vCPU, 32GB RAM - good for building
@@ -15,7 +15,7 @@ resource "aws_instance" "build_instance" {
     volume_type = "gp3"
   }
 
-  user_data = var.create_build_instance ? templatefile("${path.module}/user-data/build_instance.sh", {
+  user_data = (var.create_build_instance && var.enable_legacy_build_instance) ? templatefile("${path.module}/user-data/build_instance.sh", {
     aws_access_key_id     = var.aws_access_key_id
     aws_secret_access_key = var.aws_secret_access_key
     aws_session_token     = var.aws_session_token
@@ -34,7 +34,7 @@ resource "aws_instance" "build_instance" {
 }
 
 output "build_instance_ip" {
-  value       = var.create_build_instance ? aws_instance.build_instance[0].public_ip : "N/A"
+  value       = (var.create_build_instance && var.enable_legacy_build_instance) ? aws_instance.build_instance[0].public_ip : "N/A"
   description = "Public IP of build instance"
 }
 

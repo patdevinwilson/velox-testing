@@ -17,13 +17,28 @@ variable "key_name" {
 }
 
 variable "cluster_size" {
-  description = "Cluster size preset: test ($0.42/hr), small ($1.26/hr), medium ($9/hr), large ($17/hr), xlarge ($34/hr), xxlarge ($50/hr)"
+  description = <<-EOT
+    Cluster size preset. Options:
+    
+    x86 (Intel r7i):
+      test ($0.42/hr), small ($1.26/hr), medium ($9/hr), large ($17/hr), xlarge ($34/hr), xxlarge ($50/hr)
+    
+    ARM (Graviton r7gd with NVMe):
+      graviton-small ($1.28/hr), graviton-medium ($4.69/hr), graviton-large ($9.38/hr), graviton-xlarge ($34.95/hr)
+    
+    Cost-Optimized (best $/benchmark):
+      cost-optimized-small ($16/hr, ~$5/run), cost-optimized-medium ($17/hr, ~$6/run)
+  EOT
   type        = string
   default     = "test"
   
   validation {
-    condition     = contains(["test", "small", "medium", "large", "xlarge", "xxlarge"], var.cluster_size)
-    error_message = "cluster_size must be: test, small, medium, large, xlarge, or xxlarge"
+    condition = contains([
+      "test", "small", "medium", "large", "xlarge", "xxlarge",
+      "graviton-small", "graviton-medium", "graviton-large", "graviton-xlarge",
+      "cost-optimized-small", "cost-optimized-medium"
+    ], var.cluster_size)
+    error_message = "Invalid cluster_size. See variable description for valid options."
   }
 }
 
@@ -120,14 +135,26 @@ variable "create_build_instance" {
   default     = false  # Set to true to create build instance
 }
 
+variable "enable_legacy_build_instance" {
+  description = "Also launch the original build instance inside the cluster VPC (legacy fallback)"
+  type        = bool
+  default     = false
+}
+
+variable "build_arm64" {
+  description = "Deploy ARM64 (Graviton) build instance to compile Presto Native for ARM"
+  type        = bool
+  default     = false
+}
+
 variable "presto_native_deployment" {
-  description = "Presto Native deployment method: 'none' (Java only), 'build' (build from source), 'pull' (use pre-built image)"
+  description = "Presto Native deployment method: 'none' (Java only), 'build' (build from source), 'pull'/'prebuilt' (use pre-built image)"
   type        = string
   default     = "none"
   
   validation {
-    condition     = contains(["none", "build", "pull"], var.presto_native_deployment)
-    error_message = "presto_native_deployment must be: none, build, or pull"
+    condition     = contains(["none", "build", "pull", "prebuilt"], var.presto_native_deployment)
+    error_message = "presto_native_deployment must be: none, build, pull, or prebuilt"
   }
 }
 

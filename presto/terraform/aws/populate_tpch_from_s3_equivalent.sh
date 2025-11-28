@@ -1,7 +1,11 @@
 #!/bin/bash
-# Populate TPC-H tables in Hive using the proven CTAS pattern
-# Tables are created as managed tables (stored in S3) populated from tpch.sf100
-# This gives functionally equivalent results to external S3 tables
+# Populate TPC-H tables in Hive using external table registration with Glue
+# Tables point to existing S3 parquet files - no data movement required
+#
+# Prerequisites:
+#   - Coordinator configured with hive.metastore=glue
+#   - AWS credentials passed to coordinator container
+#   - S3 parquet data exists at s3://bucket/tpch/sfXXX/<table>/
 
 set -e
 
@@ -10,27 +14,28 @@ SSH_KEY="${HOME}/.ssh/rapids-db-io.pem"
 
 cd "${SCRIPT_DIR}"
 
-COORDINATOR_IP=$(terraform output -raw coordinator_public_ip)
-SCALE_FACTOR=$(grep "^benchmark_scale_factor" terraform.tfvars | cut -d'"' -f2)
-ENABLE_HMS=$(terraform output -raw hms_enabled 2>/dev/null || echo "false")
+# Get coordinator IP
+COORDINATOR_IP=$(terraform output -raw coordinator_public_ip 2>/dev/null)
+if [ -z "${COORDINATOR_IP}" ]; then
+    echo "ERROR: Could not get coordinator IP. Is the cluster deployed?"
+    exit 1
+fi
 
+# Get scale factor from terraform.tfvars or use default
+SCALE_FACTOR=$(grep "^benchmark_scale_factor" terraform.tfvars 2>/dev/null | cut -d'"' -f2 || echo "100")
 if [[ "${SCALE_FACTOR}" == "none" || -z "${SCALE_FACTOR}" ]]; then
     echo "benchmark_scale_factor=none detected – defaulting to SF100 for schema registration"
     SCALE_FACTOR="100"
 fi
 
+# S3 bucket configuration
 if [ -f terraform.tfvars ]; then
     S3_BUCKET=$(awk -F'=' '/^s3_tpch_bucket/ {gsub(/[ "]/,"",$2); print $2}' terraform.tfvars | tail -n1)
     S3_PREFIX=$(awk -F'=' '/^s3_tpch_prefix/ {gsub(/[ "]/,"",$2); print $2}' terraform.tfvars | tail -n1)
 fi
 
-if [ -z "${S3_BUCKET}" ]; then
-    S3_BUCKET="rapids-db-io-us-east-1"
-fi
-
-if [ -z "${S3_PREFIX}" ]; then
-    S3_PREFIX="tpch"
-fi
+S3_BUCKET="${S3_BUCKET:-rapids-db-io-us-east-1}"
+S3_PREFIX="${S3_PREFIX:-tpch}"
 
 SANITIZED_PREFIX=$(echo "${S3_PREFIX}" | sed 's#^/*##; s#/*$##')
 if [ -n "${SANITIZED_PREFIX}" ]; then
@@ -39,40 +44,52 @@ else
     S3_BASE="s3://${S3_BUCKET}/sf${SCALE_FACTOR}"
 fi
 
-if [ "${ENABLE_HMS}" = "true" ]; then
-    LOAD_MODE="external"
-    TARGET_SCHEMA="tpch_s3"
-else
-    LOAD_MODE="managed"
-    TARGET_SCHEMA="tpch"
-fi
-
-LOAD_MODE_DISPLAY=$(echo "${LOAD_MODE}" | tr '[:lower:]' '[:upper:]')
+TARGET_SCHEMA="tpch_sf${SCALE_FACTOR}"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Populating TPC-H SF${SCALE_FACTOR} Tables (${LOAD_MODE_DISPLAY} mode)"
+echo "  Registering TPC-H SF${SCALE_FACTOR} External Tables"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-if [ "${LOAD_MODE}" = "external" ]; then
-    echo "Method: Register existing S3 parquet files via HMS"
-    echo "S3 base path: ${S3_BASE}/<table>/"
-else
-    echo "Method: CREATE TABLE AS SELECT from tpch.sf${SCALE_FACTOR}"
-    echo "Result: Managed Hive tables stored in S3"
-fi
+echo "Method: Register existing S3 parquet files via Glue"
+echo "S3 base path: ${S3_BASE}/<table>/"
+echo "Target schema: hive.${TARGET_SCHEMA}"
 echo "Coordinator: ${COORDINATOR_IP}"
 echo ""
 
-ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no ec2-user@${COORDINATOR_IP} bash << EOFREMOTE
+# Run registration on coordinator
+ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no ec2-user@${COORDINATOR_IP} bash -s "${SCALE_FACTOR}" "${S3_BASE}" "${TARGET_SCHEMA}" <<'EOFREMOTE'
 set -e
 
-MODE="${LOAD_MODE}"
-SCALE_FACTOR="${SCALE_FACTOR}"
-S3_BASE="${S3_BASE}"
+SCALE_FACTOR="$1"
+S3_BASE="$2"
+SCHEMA_NAME="$3"
 
+echo "DEBUG: SCALE_FACTOR=${SCALE_FACTOR}, S3_BASE=${S3_BASE}, SCHEMA_NAME=${SCHEMA_NAME}"
+
+# Wait for Presto to be ready
+echo "Waiting for Presto to be ready..."
+MAX_WAIT=60
+for i in $(seq 1 $MAX_WAIT); do
+    if curl -s http://localhost:8080/v1/info >/dev/null 2>&1; then
+        echo "✓ Presto is ready"
+        break
+    fi
+    if [ $i -eq $MAX_WAIT ]; then
+        echo "ERROR: Presto not ready after ${MAX_WAIT} attempts"
+        exit 1
+    fi
+    sleep 2
+done
+
+# Check for active workers
+echo "Checking for active workers..."
+ACTIVE_WORKERS=$(curl -s http://localhost:8080/v1/cluster 2>/dev/null | grep -o '"activeWorkers":[0-9]*' | cut -d: -f2 || echo "0")
+echo "  Active workers: ${ACTIVE_WORKERS}"
+
+# Schema definitions for TPC-H tables
 render_schema() {
-  local table="\$1"
-  case "\${table}" in
+  local tbl="$1"
+  case "$tbl" in
     customer)
 cat <<'EOF'
 c_custkey BIGINT,
@@ -172,145 +189,101 @@ EOF
   esac
 }
 
-if [ "\${MODE}" = "external" ]; then
-  SCHEMA_NAME="tpch_s3"
-  echo "Creating schema hive.\${SCHEMA_NAME}..."
-  presto --server localhost:8080 --catalog hive --execute "
-  DROP SCHEMA IF EXISTS hive.\${SCHEMA_NAME} CASCADE;
-  CREATE SCHEMA hive.\${SCHEMA_NAME};
-  " >/dev/null 2>&1 || true
-  echo "✓ Schema ready"
-  echo ""
+# Create schema (Glue database)
+echo ""
+echo "Creating schema hive.${SCHEMA_NAME}..."
+presto --server localhost:8080 --catalog hive --execute "
+CREATE SCHEMA IF NOT EXISTS ${SCHEMA_NAME}
+" 2>&1 || echo "  (schema may already exist)"
+echo "✓ Schema ready"
+echo ""
 
-  TABLES=(nation region supplier part partsupp customer orders lineitem)
-  for table in "\${TABLES[@]}"; do
-    echo "Registering external table \${table} -> \${S3_BASE}/\${table}/"
-    schema_sql=\$(render_schema "\${table}")
-    if [ -z "\${schema_sql}" ]; then
-      echo "  ⚠️  No schema defined for \${table}, skipping"
-      continue
+# Register all 8 TPC-H tables
+TABLES=(nation region supplier part partsupp customer orders lineitem)
+SUCCESS_COUNT=0
+FAIL_COUNT=0
+
+for tbl in "${TABLES[@]}"; do
+    echo "Registering external table ${tbl} -> ${S3_BASE}/${tbl}/"
+    schema_sql=$(render_schema "${tbl}")
+    
+    if [ -z "${schema_sql}" ]; then
+        echo "  ⚠️  No schema defined for ${tbl}, skipping"
+        continue
     fi
-    presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" --file - <<SQL
-CREATE TABLE IF NOT EXISTS \${table} (
-\${schema_sql}
+    
+    # Drop existing table if it exists (to allow re-registration)
+    presto --server localhost:8080 --catalog hive --schema "${SCHEMA_NAME}" --execute "
+DROP TABLE IF EXISTS ${tbl}
+" 2>/dev/null || true
+    
+    # Create external table
+    if presto --server localhost:8080 --catalog hive --schema "${SCHEMA_NAME}" --execute "
+CREATE TABLE ${tbl} (
+${schema_sql}
 )
 WITH (
-    external_location = '\${S3_BASE}/\${table}/',
+    external_location = '${S3_BASE}/${tbl}/',
     format = 'PARQUET'
-);
-SQL
-    count=\$(presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" \
-        --execute "SELECT count(*) FROM \${table};" 2>&1 | tail -1 | tr -d '"')
-    echo "  ✓ \${table}: \${count} rows"
+)
+" 2>&1; then
+        # Verify table by counting rows
+        cnt=$(presto --server localhost:8080 --catalog hive --schema "${SCHEMA_NAME}" \
+            --execute "SELECT count(*) FROM ${tbl}" 2>&1 | tail -1 | tr -d '"' || echo "ERROR")
+        
+        if [[ "${cnt}" =~ ^[0-9]+$ ]]; then
+            echo "  ✓ ${tbl}: ${cnt} rows"
+            SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+        else
+            echo "  ⚠️  ${tbl}: created but count failed (${cnt})"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+    else
+        echo "  ✗ ${tbl}: failed to create"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
     echo ""
-  done
+done
 
-  echo "External registration complete. Query tables via hive.\${SCHEMA_NAME}"
-else
-  SCHEMA_NAME="tpch"
-  CREATE_ALL="false"
-  if [ "\${SCALE_FACTOR}" = "100" ]; then
-    CREATE_ALL="true"
-  fi
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Registration Summary"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Success: ${SUCCESS_COUNT}/8 tables"
+if [ ${FAIL_COUNT} -gt 0 ]; then
+    echo "  Failed:  ${FAIL_COUNT}/8 tables"
+fi
+echo ""
 
-  echo "Creating hive.\${SCHEMA_NAME} schema..."
-  presto --server localhost:8080 --catalog hive --execute "
-  DROP SCHEMA IF EXISTS hive.\${SCHEMA_NAME} CASCADE;
-  CREATE SCHEMA hive.\${SCHEMA_NAME};
-  " >/dev/null 2>&1 || true
-  echo "✓ Schema ready"
-  echo ""
-
-  echo "Creating dimension tables..."
-  for table in nation region; do
-    echo "  - \${table}"
-    presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" --execute "
-      CREATE TABLE \${table} WITH (format = 'PARQUET') AS
-      SELECT * FROM tpch.sf\${SCALE_FACTOR}.\${table};
-    " >/dev/null 2>&1
-    count=\$(presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" \
-      --execute "SELECT count(*) FROM \${table};" 2>&1 | tail -1 | tr -d '"')
-    echo "    ✓ rows: \${count}"
-  done
-  echo ""
-
-  echo "Creating medium tables..."
-  for table in supplier part customer; do
-    echo "  - \${table}"
-    presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" --execute "
-      CREATE TABLE \${table} WITH (format = 'PARQUET') AS
-      SELECT * FROM tpch.sf\${SCALE_FACTOR}.\${table};
-    " >/dev/null 2>&1
-    count=\$(presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" \
-      --execute "SELECT count(*) FROM \${table};" 2>&1 | tail -1 | tr -d '"')
-    echo "    ✓ rows: \${count}"
-  done
-  echo ""
-
-  echo "Creating partsupp..."
-  presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" --execute "
-    CREATE TABLE partsupp WITH (format = 'PARQUET') AS
-    SELECT * FROM tpch.sf\${SCALE_FACTOR}.partsupp;
-  " >/dev/null 2>&1
-  count=\$(presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" \
-    --execute "SELECT count(*) FROM partsupp;" 2>&1 | tail -1 | tr -d '"')
-  echo "    ✓ partsupp rows: \${count}"
-  echo ""
-
-  if [ "\${CREATE_ALL}" = "true" ]; then
-    echo "Creating large fact tables (orders, lineitem)..."
-    presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" --execute "
-      CREATE TABLE orders WITH (format = 'PARQUET') AS
-      SELECT * FROM tpch.sf\${SCALE_FACTOR}.orders;
-    " >/dev/null 2>&1
-    presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" --execute "
-      CREATE TABLE lineitem WITH (format = 'PARQUET') AS
-      SELECT * FROM tpch.sf\${SCALE_FACTOR}.lineitem;
-    " >/dev/null 2>&1
-    for table in orders lineitem; do
-      count=\$(presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" \
-        --execute "SELECT count(*) FROM \${table};" 2>&1 | tail -1 | tr -d '"')
-      echo "    ✓ \${table}: \${count} rows"
-    done
-  else
-    echo "Skipping orders and lineitem CTAS for SF\${SCALE_FACTOR} (use tpch.sf\${SCALE_FACTOR})"
-  fi
-
-  echo ""
-  echo "Verification query (TPC-H Q6)..."
-  presto --server localhost:8080 --catalog hive --schema "\${SCHEMA_NAME}" --execute "
-  SELECT sum(l_extendedprice * l_discount) as revenue
-  FROM lineitem
-  WHERE l_shipdate >= date '1994-01-01'
-    AND l_shipdate < date '1995-01-01'
-    AND l_discount between 0.05 and 0.07
-    AND l_quantity < 24;
-  " 2>&1 | tail -1
+# Run verification query if lineitem was created successfully
+if [ ${SUCCESS_COUNT} -ge 1 ]; then
+    echo "Verification: TPC-H Q6 on lineitem..."
+    result=$(presto --server localhost:8080 --catalog hive --schema "${SCHEMA_NAME}" --execute "
+SELECT sum(l_extendedprice * l_discount) as revenue
+FROM lineitem
+WHERE l_shipdate >= date '1994-01-01'
+  AND l_shipdate < date '1995-01-01'
+  AND l_discount between 0.05 and 0.07
+  AND l_quantity < 24
+" 2>&1 | tail -1)
+    echo "  Q6 Revenue: ${result}"
 fi
 
 EOFREMOTE
 
-if [ "${LOAD_MODE}" = "external" ]; then
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  ✅ External TPCH tables registered via HMS!"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Schema: hive.tpch_s3"
-    echo "Backed by: ${S3_BASE}/<table>/"
-else
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  ✅ Managed TPCH tables written to S3!"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Schema: hive.tpch"
-    echo "Data: SF${SCALE_FACTOR}"
-fi
-
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  ✅ TPC-H SF${SCALE_FACTOR} Tables Registered in Glue"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Schema: hive.${TARGET_SCHEMA}"
+echo "Data:   ${S3_BASE}/<table>/"
 echo ""
 echo "Access via:"
 echo "  ssh -i ~/.ssh/rapids-db-io.pem ec2-user@${COORDINATOR_IP}"
 echo "  presto --server localhost:8080 --catalog hive --schema ${TARGET_SCHEMA}"
 echo ""
+echo "Run benchmark:"
+echo "  ./run_tpch_benchmark.sh ${SCALE_FACTOR}"
+echo ""
 echo "Web UI: http://${COORDINATOR_IP}:8080"
 echo ""
-

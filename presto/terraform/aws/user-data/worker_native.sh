@@ -43,8 +43,8 @@ AWSCONFIG
 chmod 600 /root/.aws/credentials
 chmod 600 /root/.aws/config
 
-# Create directories
-mkdir -p /opt/presto/etc/catalog /var/presto/data /var/presto/data/spill /var/presto/catalog
+# Create directories (including AsyncDataCache directory)
+mkdir -p /opt/presto/etc/catalog /var/presto/data /var/presto/data/spill /var/presto/catalog /var/presto/cache
 
 # Pull or download Presto Native image (same stable build as coordinator)
 PRESTO_IMAGE_SOURCE="${presto_native_image}"
@@ -207,6 +207,39 @@ TASK_CONCURRENCY=$(awk -v n="$TASK_CONCURRENCY" 'BEGIN {
   print p;
 }')
 
+# AsyncDataCache size calculation
+# Check for NVMe instance storage (r7gd, i3, etc.)
+# NVMe devices are typically /dev/nvme1n1 or similar (nvme0 is usually root)
+NVME_DEVICE=""
+for dev in /dev/nvme1n1 /dev/nvme2n1 /dev/nvme3n1; do
+    if [ -b "$$dev" ]; then
+        NVME_DEVICE="$$dev"
+        break
+    fi
+done
+
+if [ -n "$$NVME_DEVICE" ]; then
+    echo "Found NVMe instance storage: $$NVME_DEVICE"
+    # Format and mount NVMe for cache
+    mkfs.xfs -f "$$NVME_DEVICE" 2>/dev/null || true
+    mkdir -p /var/presto/cache
+    mount "$$NVME_DEVICE" /var/presto/cache 2>/dev/null || true
+    chown -R root:root /var/presto/cache
+    
+    # Get NVMe size for cache
+    NVME_SIZE_GB=$$(lsblk -b -d -o SIZE "$$NVME_DEVICE" 2>/dev/null | tail -1 | awk '{print int($$1/1024/1024/1024)}')
+    CACHE_SIZE_GB=$$((NVME_SIZE_GB * 80 / 100))  # Use 80% of NVMe for cache
+    if [ "$$CACHE_SIZE_GB" -gt 1500 ]; then CACHE_SIZE_GB=1500; fi
+    echo "NVMe cache size: $${CACHE_SIZE_GB}GB"
+else
+    # Fallback to EBS-based cache (50% of available, capped at 200GB)
+    AVAILABLE_DISK_GB=$$(df -BG /var/presto | tail -1 | awk '{print int($$4)}')
+    CACHE_SIZE_GB=$$((AVAILABLE_DISK_GB / 2))
+    if [ "$$CACHE_SIZE_GB" -gt 200 ]; then CACHE_SIZE_GB=200; fi
+fi
+
+if [ "$$CACHE_SIZE_GB" -lt 10 ]; then CACHE_SIZE_GB=10; fi
+
 echo "=================================================="
 echo " Native Worker Configuration (velox-testing)"
 echo "=================================================="
@@ -217,6 +250,7 @@ echo "System Reserved: $${SYSTEM_RESERVED_GB}GB"
 echo "Worker Memory: $${WORKER_MEMORY_GB}GB (95% of usable)"
 echo "Buffer Memory: $${BUFFER_MEM_GB}GB"
 echo "Task Concurrency: $${TASK_CONCURRENCY}"
+echo "AsyncDataCache: $${CACHE_SIZE_GB}GB (SSD cache for S3)"
 echo "=================================================="
 
 # node.properties
@@ -241,7 +275,7 @@ done
 
 # Fallback
 if [ -z "$WORKER_IP" ]; then
-  WORKER_IP=$(hostname -I | awk '{print $1}')
+WORKER_IP=$(hostname -I | awk '{print $1}')
 fi
 
 echo "Worker IP: $WORKER_IP"
@@ -289,12 +323,21 @@ native-execution-enabled=true
 system-mem-pushback-enabled=true
 system-mem-limit-gb=$${WORKER_MEMORY_GB}
 system-mem-shrink-gb=20
+
+# AsyncDataCache (SSD Cache) for S3 data
+# Caches remote data locally to avoid repeated S3 reads
+# Significantly improves performance for repeated queries
+async-data-cache-enabled=true
+async-cache-ssd-gb=$${CACHE_SIZE_GB}
+async-cache-ssd-path=/var/presto/cache
+async-cache-ssd-checkpoint-enabled=true
 EOFCONFIG
 
 # catalog/hive.properties
 HIVE_PROPERTIES_FILE=/opt/presto/etc/catalog/hive.properties
 
 if [ "$ENABLE_HMS" = "true" ] && [ -n "$HIVE_METASTORE_URI" ]; then
+# HMS mode - use Thrift metastore
 cat > "$HIVE_PROPERTIES_FILE" << EOF
 connector.name=hive-hadoop2
 hive.metastore.uri=$${HIVE_METASTORE_URI}
@@ -302,9 +345,6 @@ hive.metastore.uri=$${HIVE_METASTORE_URI}
 hive.s3.endpoint=s3.us-east-1.amazonaws.com
 hive.s3.path-style-access=false
 hive.s3.max-connections=500
-hive.s3.aws-access-key=${aws_access_key_id}
-hive.s3.aws-secret-key=${aws_secret_access_key}
-hive.s3.session-token=${aws_session_token}
 
 hive.storage-format=PARQUET
 hive.compression-codec=SNAPPY
@@ -314,10 +354,12 @@ hive.max-partitions-per-scan=100000
 hive.max-split-size=128MB
 EOF
 else
+# Default: Use AWS Glue Data Catalog for S3 external tables
+# Credentials are passed via environment variables to the container
 cat > "$HIVE_PROPERTIES_FILE" << 'HIVEEOF'
 connector.name=hive-hadoop2
-hive.metastore=file
-hive.metastore.catalog.dir=/var/presto/catalog
+hive.metastore=glue
+hive.metastore.glue.region=us-east-1
 
 hive.s3.endpoint=s3.us-east-1.amazonaws.com
 hive.s3.path-style-access=false
@@ -352,6 +394,7 @@ ExecStart=/usr/bin/docker run --rm \\
   -v /opt/presto/etc:/opt/presto-server/etc:ro \\
   -v /var/presto/data:/var/presto/data \\
   -v /var/presto/catalog:/var/presto/catalog \\
+  -v /var/presto/cache:/var/presto/cache \\
   -e LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64:/usr/lib:/usr/lib64 \\
   -e AWS_ACCESS_KEY_ID=${aws_access_key_id} \\
   -e AWS_SECRET_ACCESS_KEY=${aws_secret_access_key} \\

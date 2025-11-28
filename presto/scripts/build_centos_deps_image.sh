@@ -88,7 +88,7 @@ cp -r ../../velox/CMake velox
 
 # now build
 echo "Building..."
-docker compose --progress plain build ${NO_CACHE_ARG} centos-native-dependency
+docker-compose build ${NO_CACHE_ARG} centos-native-dependency
 
 # done (will cleanup on exit)
 echo "Presto dependencies/run-time container image built!"
