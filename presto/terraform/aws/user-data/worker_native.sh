@@ -46,8 +46,18 @@ chmod 600 /root/.aws/config
 # Create directories (including AsyncDataCache directory)
 mkdir -p /opt/presto/etc/catalog /var/presto/data /var/presto/data/spill /var/presto/catalog /var/presto/cache
 
-# Pull or download Presto Native image (same stable build as coordinator)
-PRESTO_IMAGE_SOURCE="${presto_native_image}"
+# Detect architecture from the host system (most reliable method)
+HOST_ARCH=$(uname -m)
+echo "Detected host architecture: $${HOST_ARCH}"
+
+# Select the appropriate Presto Native image based on architecture
+if [[ "$${HOST_ARCH}" == "aarch64" ]] || [[ "$${HOST_ARCH}" == "arm64" ]]; then
+    PRESTO_IMAGE_SOURCE="s3://rapids-db-io-us-east-1/docker-images/presto-worker-arm64-latest.tar.gz"
+    echo "Using ARM64 worker image for Graviton"
+else
+    PRESTO_IMAGE_SOURCE="s3://rapids-db-io-us-east-1/docker-images/presto-worker-matched-latest.tar.gz"
+    echo "Using x86_64 worker image"
+fi
 PRESTO_IMAGE="presto-native-cpu:latest"
 
 echo "Presto Native image source: $${PRESTO_IMAGE_SOURCE}"
@@ -176,6 +186,12 @@ if [ "$SYSTEM_RESERVED_GB" -gt 2 ]; then SYSTEM_RESERVED_GB=2; fi
 USABLE_RAM_GB=$((TOTAL_RAM_GB - SYSTEM_RESERVED_GB))
 WORKER_MEMORY_GB=$((USABLE_RAM_GB * 95 / 100))
 
+# Scale factor for configuration tuning
+SCALE_FACTOR="${benchmark_scale_factor}"
+if [ -z "$SCALE_FACTOR" ] || ! [[ "$SCALE_FACTOR" =~ ^[0-9]+$ ]]; then
+  SCALE_FACTOR=100
+fi
+
 # Buffer memory (5% of worker memory)
 # Scale cap based on scale factor: SF100=32GB, SF1000=64GB, SF3000=100GB
 BUFFER_MEM_GB=$((WORKER_MEMORY_GB * 5 / 100))
@@ -190,7 +206,6 @@ if [ "$BUFFER_MEM_GB" -gt "$BUFFER_CAP" ]; then BUFFER_MEM_GB=$BUFFER_CAP; fi
 
 # Task concurrency: For Native, use vCPU count directly (not multiplied)
 # For large scale factors, increase slightly
-SCALE_FACTOR=${benchmark_scale_factor}
 if [ "$SCALE_FACTOR" -ge 1000 ]; then
   TASK_CONCURRENCY=$((VCPUS * 2))
 else
@@ -212,33 +227,33 @@ TASK_CONCURRENCY=$(awk -v n="$TASK_CONCURRENCY" 'BEGIN {
 # NVMe devices are typically /dev/nvme1n1 or similar (nvme0 is usually root)
 NVME_DEVICE=""
 for dev in /dev/nvme1n1 /dev/nvme2n1 /dev/nvme3n1; do
-    if [ -b "$$dev" ]; then
-        NVME_DEVICE="$$dev"
+    if [ -b "$dev" ]; then
+        NVME_DEVICE="$dev"
         break
     fi
 done
 
-if [ -n "$$NVME_DEVICE" ]; then
-    echo "Found NVMe instance storage: $$NVME_DEVICE"
+if [ -n "$NVME_DEVICE" ]; then
+    echo "Found NVMe instance storage: $NVME_DEVICE"
     # Format and mount NVMe for cache
-    mkfs.xfs -f "$$NVME_DEVICE" 2>/dev/null || true
+    mkfs.xfs -f "$NVME_DEVICE" 2>/dev/null || true
     mkdir -p /var/presto/cache
-    mount "$$NVME_DEVICE" /var/presto/cache 2>/dev/null || true
+    mount "$NVME_DEVICE" /var/presto/cache 2>/dev/null || true
     chown -R root:root /var/presto/cache
     
     # Get NVMe size for cache
-    NVME_SIZE_GB=$$(lsblk -b -d -o SIZE "$$NVME_DEVICE" 2>/dev/null | tail -1 | awk '{print int($$1/1024/1024/1024)}')
-    CACHE_SIZE_GB=$$((NVME_SIZE_GB * 80 / 100))  # Use 80% of NVMe for cache
-    if [ "$$CACHE_SIZE_GB" -gt 1500 ]; then CACHE_SIZE_GB=1500; fi
+    NVME_SIZE_GB=$(lsblk -b -d -o SIZE "$NVME_DEVICE" 2>/dev/null | tail -1 | awk '{print int($1/1024/1024/1024)}')
+    CACHE_SIZE_GB=$((NVME_SIZE_GB * 80 / 100))  # Use 80% of NVMe for cache
+    if [ "$CACHE_SIZE_GB" -gt 1500 ]; then CACHE_SIZE_GB=1500; fi
     echo "NVMe cache size: $${CACHE_SIZE_GB}GB"
 else
     # Fallback to EBS-based cache (50% of available, capped at 200GB)
-    AVAILABLE_DISK_GB=$$(df -BG /var/presto | tail -1 | awk '{print int($$4)}')
-    CACHE_SIZE_GB=$$((AVAILABLE_DISK_GB / 2))
-    if [ "$$CACHE_SIZE_GB" -gt 200 ]; then CACHE_SIZE_GB=200; fi
+    AVAILABLE_DISK_GB=$(df -BG /var/presto | tail -1 | awk '{print int($4)}')
+    CACHE_SIZE_GB=$((AVAILABLE_DISK_GB / 2))
+    if [ "$CACHE_SIZE_GB" -gt 200 ]; then CACHE_SIZE_GB=200; fi
 fi
 
-if [ "$$CACHE_SIZE_GB" -lt 10 ]; then CACHE_SIZE_GB=10; fi
+if [ "$CACHE_SIZE_GB" -lt 10 ]; then CACHE_SIZE_GB=10; fi
 
 echo "=================================================="
 echo " Native Worker Configuration (velox-testing)"

@@ -130,7 +130,15 @@ locals {
   final_worker_count     = var.worker_count != 0 ? var.worker_count : local.selected_config.worker_count
   
   # Architecture detection for AMI selection
-  cluster_arch = local.selected_config.arch
+  # If custom worker_instance_type is provided, detect arch from instance type
+  # Graviton instances: r7g, r7gd, c7g, m7g, etc.
+  custom_is_arm64 = var.worker_instance_type != "" ? (
+    can(regex("^[cmr]7g", var.worker_instance_type)) ||
+    can(regex("^[cmr]6g", var.worker_instance_type)) ||
+    can(regex("^t4g", var.worker_instance_type))
+  ) : false
+  
+  cluster_arch = local.custom_is_arm64 ? "arm64" : local.selected_config.arch
   is_arm64     = local.cluster_arch == "arm64"
 }
 

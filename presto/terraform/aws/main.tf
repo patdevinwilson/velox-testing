@@ -161,21 +161,22 @@ resource "aws_instance" "coordinator" {
   # Java Coordinator + Native Workers (matches velox-testing exactly)
   # This is the proven architecture from velox-testing
   user_data = templatefile("${path.module}/user-data/coordinator_java.sh", {
-    cluster_name            = var.cluster_name
-    aws_access_key_id       = var.aws_access_key_id
-    aws_secret_access_key   = var.aws_secret_access_key
-    aws_session_token       = var.aws_session_token
-    benchmark_scale_factor  = var.benchmark_scale_factor
-    s3_tpch_bucket          = var.s3_tpch_bucket
-    s3_tpch_prefix          = var.s3_tpch_prefix
-    worker_count            = local.final_worker_count
-    worker_instance_type    = local.final_worker_type
-    enable_hms              = var.enable_hms
-    hms_db_endpoint         = var.enable_hms ? module.hms.hms_db_endpoint : ""
-    hms_db_name             = var.enable_hms ? "metastore" : ""
-    hms_db_user             = var.enable_hms ? "hive" : ""
-    hms_db_password         = var.enable_hms ? var.hms_db_password : ""
-    hive_warehouse_dir      = var.enable_hms ? format(
+    cluster_name               = var.cluster_name
+    aws_access_key_id          = var.aws_access_key_id
+    aws_secret_access_key      = var.aws_secret_access_key
+    aws_session_token          = var.aws_session_token
+    benchmark_scale_factor     = var.benchmark_scale_factor
+    s3_tpch_bucket             = var.s3_tpch_bucket
+    s3_tpch_prefix             = var.s3_tpch_prefix
+    worker_count               = local.final_worker_count
+    worker_instance_type       = local.final_worker_type
+    presto_native_image_source = var.presto_native_image_source
+    enable_hms                 = var.enable_hms
+    hms_db_endpoint            = var.enable_hms ? module.hms.hms_db_endpoint : ""
+    hms_db_name                = var.enable_hms ? "metastore" : ""
+    hms_db_user                = var.enable_hms ? "hive" : ""
+    hms_db_password            = var.enable_hms ? var.hms_db_password : ""
+    hive_warehouse_dir         = var.enable_hms ? format(
       "s3://%s/%s/hive-warehouse/",
       var.s3_tpch_bucket != "" ? var.s3_tpch_bucket : "rapids-db-io-us-east-1",
       var.s3_tpch_prefix != "" ? var.s3_tpch_prefix : "tpch"

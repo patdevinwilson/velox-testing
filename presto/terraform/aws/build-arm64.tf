@@ -5,7 +5,7 @@ resource "aws_instance" "build_arm64" {
   count = var.build_arm64 ? 1 : 0
 
   ami           = data.aws_ami.amazon_linux_arm64[0].id
-  instance_type = "c7g.4xlarge"  # 16 vCPU, 32GB RAM - good for compilation
+  instance_type = "c7g.8xlarge"  # 32 vCPU, 64GB RAM - needed for heavy C++ compilation
   key_name      = var.key_name
   subnet_id     = aws_subnet.presto_subnet.id
 

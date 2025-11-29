@@ -122,15 +122,15 @@ ARG BUILD_TYPE=release
 ARG NUM_THREADS=16
 ARG EXTRA_CMAKE_FLAGS="-DPRESTO_ENABLE_TESTING=OFF -DPRESTO_ENABLE_PARQUET=ON -DVELOX_ENABLE_S3=ON -DVELOX_ENABLE_HDFS=ON -DVELOX_BUILD_TESTING=OFF"
 
-ENV EXTRA_CMAKE_FLAGS=${EXTRA_CMAKE_FLAGS}
-ENV NUM_THREADS=${NUM_THREADS}
+ENV EXTRA_CMAKE_FLAGS=$${EXTRA_CMAKE_FLAGS}
+ENV NUM_THREADS=$${NUM_THREADS}
 
 RUN mkdir /runtime-libraries
 
 RUN --mount=type=bind,source=.,target=/presto_native_staging/presto \
     --mount=type=cache,target=/build_cache \
     make --directory="/presto_native_staging/presto" cmake-and-build \
-        BUILD_TYPE=${BUILD_TYPE} \
+        BUILD_TYPE=$${BUILD_TYPE} \
         BUILD_DIR="" \
         BUILD_BASE_DIR=/build_cache && \
     cp /build_cache/presto_cpp/main/presto_server /usr/bin/ && \
@@ -191,7 +191,7 @@ FROM amazoncorretto:17
 
 WORKDIR /opt/presto-server
 
-COPY ${PRESTO_DIR}/ /opt/presto-server/
+COPY $${PRESTO_DIR}/ /opt/presto-server/
 
 RUN mkdir -p /opt/presto-server/etc /var/presto/data
 
@@ -210,19 +210,19 @@ echo "[$(date +%H:%M:%S)] Uploading ARM64 images to S3"
 echo "============================================================"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
-docker save presto-native-arm64:latest | gzip > /home/ec2-user/presto-worker-arm64-${TIMESTAMP}.tar.gz
-docker save presto-coordinator-arm64:latest | gzip > /home/ec2-user/presto-coordinator-arm64-${TIMESTAMP}.tar.gz
+docker save presto-native-arm64:latest | gzip > /home/ec2-user/presto-worker-arm64-$${TIMESTAMP}.tar.gz
+docker save presto-coordinator-arm64:latest | gzip > /home/ec2-user/presto-coordinator-arm64-$${TIMESTAMP}.tar.gz
 
 # Upload with timestamp
-aws s3 cp /home/ec2-user/presto-worker-arm64-${TIMESTAMP}.tar.gz \
+aws s3 cp /home/ec2-user/presto-worker-arm64-$${TIMESTAMP}.tar.gz \
     s3://rapids-db-io-us-east-1/docker-images/ --no-progress
-aws s3 cp /home/ec2-user/presto-coordinator-arm64-${TIMESTAMP}.tar.gz \
+aws s3 cp /home/ec2-user/presto-coordinator-arm64-$${TIMESTAMP}.tar.gz \
     s3://rapids-db-io-us-east-1/docker-images/ --no-progress
 
 # Also upload as latest
-aws s3 cp /home/ec2-user/presto-worker-arm64-${TIMESTAMP}.tar.gz \
+aws s3 cp /home/ec2-user/presto-worker-arm64-$${TIMESTAMP}.tar.gz \
     s3://rapids-db-io-us-east-1/docker-images/presto-worker-arm64-latest.tar.gz --no-progress
-aws s3 cp /home/ec2-user/presto-coordinator-arm64-${TIMESTAMP}.tar.gz \
+aws s3 cp /home/ec2-user/presto-coordinator-arm64-$${TIMESTAMP}.tar.gz \
     s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-arm64-latest.tar.gz --no-progress
 
 echo ""
@@ -233,8 +233,8 @@ echo "Worker image: s3://rapids-db-io-us-east-1/docker-images/presto-worker-arm6
 echo "Coordinator image: s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-arm64-latest.tar.gz"
 echo ""
 echo "Timestamped versions:"
-echo "  presto-worker-arm64-${TIMESTAMP}.tar.gz"
-echo "  presto-coordinator-arm64-${TIMESTAMP}.tar.gz"
+echo "  presto-worker-arm64-$${TIMESTAMP}.tar.gz"
+echo "  presto-coordinator-arm64-$${TIMESTAMP}.tar.gz"
 echo ""
 date
 touch /home/ec2-user/BUILD_COMPLETE

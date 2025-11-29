@@ -59,7 +59,19 @@ mkdir -p /var/presto/data /var/presto/catalog /opt/hms/conf
 
 # Download Presto Coordinator Docker image from S3
 echo "Downloading Presto Coordinator image from S3..."
-COORDINATOR_IMAGE_SOURCE="s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-matched-latest.tar.gz"
+
+# Detect architecture from the host system (most reliable method)
+HOST_ARCH=$(uname -m)
+echo "Detected host architecture: $${HOST_ARCH}"
+
+if [[ "$${HOST_ARCH}" == "aarch64" ]] || [[ "$${HOST_ARCH}" == "arm64" ]]; then
+    COORDINATOR_IMAGE_SOURCE="s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-arm64-latest.tar.gz"
+    echo "Using ARM64 coordinator image for Graviton"
+else
+    COORDINATOR_IMAGE_SOURCE="s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-matched-latest.tar.gz"
+    echo "Using x86_64 coordinator image"
+fi
+echo "Coordinator image: $${COORDINATOR_IMAGE_SOURCE}"
 IMAGE_FILE="/tmp/presto-coordinator.tar.gz"
 
 export AWS_ACCESS_KEY_ID="${aws_access_key_id}"
@@ -260,6 +272,10 @@ query-manager.required-workers-max-wait=10s
 
 # Match worker version for compatibility
 presto.version=testversion
+
+# Disable hash precomputation for Velox worker compatibility
+# This prevents $hashvalue and $operator$hash_code errors
+optimizer.optimize-hash-generation=false
 EOF
 
 # log.properties
