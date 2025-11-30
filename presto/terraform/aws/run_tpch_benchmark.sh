@@ -67,32 +67,59 @@ update_cluster_credentials() {
     # Update workers - create service file on each worker with dynamic memory
     for ip in $(terraform output -json worker_public_ips 2>/dev/null | jq -r '.[]' 2>/dev/null); do
         ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=5 ec2-user@$ip "
-            # Calculate memory based on instance size (use 85% of total RAM)
+            # Calculate memory based on instance size
             TOTAL_RAM_GB=\$(free -g | awk '/^Mem:/{print \$2}')
             if [ -z \"\$TOTAL_RAM_GB\" ] || [ \"\$TOTAL_RAM_GB\" = \"0\" ]; then
                 TOTAL_RAM_MB=\$(free -m | awk '/^Mem:/{print \$2}')
                 TOTAL_RAM_GB=\$((TOTAL_RAM_MB / 1024))
             fi
-            # Use 85% for docker, leave headroom for OS
-            DOCKER_MEM=\$((TOTAL_RAM_GB * 85 / 100))
-            # For SF3000, cap at 54GB per worker to prevent OOM on Q21
-            if [ \"\$DOCKER_MEM\" -gt 54 ]; then DOCKER_MEM=54; fi
+            
+            # Memory allocation based on instance RAM:
+            # - Leave 15-20% headroom for OS and Q21 memory spikes
+            # - Larger instances can use higher percentage
+            if [ \"\$TOTAL_RAM_GB\" -ge 256 ]; then
+                # 256GB+ instances (r7gd.8xlarge+): use 85%, cap at 200GB
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 85 / 100))
+                if [ \"\$DOCKER_MEM\" -gt 200 ]; then DOCKER_MEM=200; fi
+                PRESTO_MEM=\$((DOCKER_MEM - 8))
+                CONCURRENCY=32
+            elif [ \"\$TOTAL_RAM_GB\" -ge 120 ]; then
+                # 128GB instances (r7gd.4xlarge): use 85%, ~100GB for Presto
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 85 / 100))
+                PRESTO_MEM=\$((DOCKER_MEM - 8))
+                CONCURRENCY=16
+            elif [ \"\$TOTAL_RAM_GB\" -ge 60 ]; then
+                # 64GB instances (r7gd.2xlarge): use 85%, cap at 54GB for Q21
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 90 / 100))
+                PRESTO_MEM=54
+                CONCURRENCY=8
+            else
+                # Smaller instances: use 80%
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 80 / 100))
+                PRESTO_MEM=\$((DOCKER_MEM - 4))
+                CONCURRENCY=8
+            fi
             if [ \"\$DOCKER_MEM\" -lt 8 ]; then DOCKER_MEM=8; fi
+            if [ \"\$PRESTO_MEM\" -lt 4 ]; then PRESTO_MEM=4; fi
             
             # Update config.properties with optimized memory settings
-            sudo sed -i \"s/system-memory-gb=.*/system-memory-gb=\${DOCKER_MEM}/\" /opt/presto/etc/config.properties 2>/dev/null || true
-            sudo sed -i \"s/query-memory-gb=.*/query-memory-gb=\${DOCKER_MEM}/\" /opt/presto/etc/config.properties 2>/dev/null || true
-            sudo sed -i \"s/query.max-memory-per-node=.*/query.max-memory-per-node=\${DOCKER_MEM}GB/\" /opt/presto/etc/config.properties 2>/dev/null || true
-            sudo sed -i \"s/query.max-total-memory-per-node=.*/query.max-total-memory-per-node=\${DOCKER_MEM}GB/\" /opt/presto/etc/config.properties 2>/dev/null || true
-            sudo sed -i \"s/system-mem-limit-gb=.*/system-mem-limit-gb=\${DOCKER_MEM}/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/system-memory-gb=.*/system-memory-gb=\${PRESTO_MEM}/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/query-memory-gb=.*/query-memory-gb=\${PRESTO_MEM}/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/query.max-memory-per-node=.*/query.max-memory-per-node=\${PRESTO_MEM}GB/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/query.max-total-memory-per-node=.*/query.max-total-memory-per-node=\${PRESTO_MEM}GB/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/system-mem-limit-gb=.*/system-mem-limit-gb=\${PRESTO_MEM}/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            
+            # Calculate abort limit (80% of Presto mem)
+            ABORT_LIMIT=\$((PRESTO_MEM * 80 / 100))
             
             # Ensure SF3000 optimizations are applied
             grep -q 'global-arbitration-enabled' /opt/presto/etc/config.properties || echo 'global-arbitration-enabled=true' | sudo tee -a /opt/presto/etc/config.properties > /dev/null
-            grep -q 'memory-pool-abort-capacity-limit' /opt/presto/etc/config.properties || echo 'memory-pool-abort-capacity-limit=40GB' | sudo tee -a /opt/presto/etc/config.properties > /dev/null
-            # Reduce concurrency for memory-intensive queries
-            sudo sed -i 's/task.concurrency=.*/task.concurrency=8/' /opt/presto/etc/config.properties 2>/dev/null || true
-            sudo sed -i 's/task.max-worker-threads=.*/task.max-worker-threads=8/' /opt/presto/etc/config.properties 2>/dev/null || true
-            sudo sed -i 's/task.max-drivers-per-task=.*/task.max-drivers-per-task=8/' /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/memory-pool-abort-capacity-limit=.*/memory-pool-abort-capacity-limit=\${ABORT_LIMIT}GB/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            
+            # Set concurrency based on instance size
+            sudo sed -i \"s/task.concurrency=.*/task.concurrency=\${CONCURRENCY}/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/task.max-worker-threads=.*/task.max-worker-threads=\${CONCURRENCY}/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/task.max-drivers-per-task=.*/task.max-drivers-per-task=\${CONCURRENCY}/\" /opt/presto/etc/config.properties 2>/dev/null || true
             
             sudo tee /etc/systemd/system/presto.service > /dev/null << SVCEOF
 [Unit]
