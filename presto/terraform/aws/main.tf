@@ -160,7 +160,8 @@ resource "aws_instance" "coordinator" {
 
   # Java Coordinator + Native Workers (matches velox-testing exactly)
   # This is the proven architecture from velox-testing
-  user_data = templatefile("${path.module}/user-data/coordinator_java.sh", {
+  # Use base64gzip to compress user_data (AWS 16KB limit)
+  user_data_base64 = base64gzip(templatefile("${path.module}/user-data/coordinator_java.sh", {
     cluster_name               = var.cluster_name
     aws_access_key_id          = var.aws_access_key_id
     aws_secret_access_key      = var.aws_secret_access_key
@@ -181,7 +182,7 @@ resource "aws_instance" "coordinator" {
       var.s3_tpch_bucket != "" ? var.s3_tpch_bucket : "rapids-db-io-us-east-1",
       var.s3_tpch_prefix != "" ? var.s3_tpch_prefix : "tpch"
     ) : ""
-  })
+  }))
 
   tags = {
     Name = "${var.cluster_name}-coordinator"
@@ -217,7 +218,8 @@ resource "aws_instance" "workers" {
   # })
 
   # OPTION 2: Presto Native Workers (High Performance, Stable Build)
-  user_data = templatefile("${path.module}/user-data/worker_native.sh", {
+  # Use base64gzip to compress user_data (AWS 16KB limit)
+  user_data_base64 = base64gzip(templatefile("${path.module}/user-data/worker_native.sh", {
     cluster_name           = var.cluster_name
     coordinator_ip         = aws_instance.coordinator[0].private_ip
     worker_id              = count.index
@@ -228,7 +230,7 @@ resource "aws_instance" "workers" {
     benchmark_scale_factor = var.benchmark_scale_factor
     enable_hms             = var.enable_hms
     hive_metastore_uri     = var.enable_hms ? format("thrift://%s:9083", aws_instance.coordinator[0].private_ip) : ""
-  })
+  }))
 
   tags = {
     Name = "${var.cluster_name}-worker-${count.index}"

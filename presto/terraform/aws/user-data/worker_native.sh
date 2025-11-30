@@ -414,7 +414,8 @@ ExecStart=/usr/bin/docker run --rm \\
   -e AWS_ACCESS_KEY_ID=${aws_access_key_id} \\
   -e AWS_SECRET_ACCESS_KEY=${aws_secret_access_key} \\
   -e AWS_SESSION_TOKEN=${aws_session_token} \\
-  $${PRESTO_IMAGE}
+  $${PRESTO_IMAGE} \\
+  --etc_dir=/opt/presto-server/etc --logtostderr=1 --v=1
 ExecStop=/usr/bin/docker stop presto-worker
 Restart=always
 RestartSec=10
