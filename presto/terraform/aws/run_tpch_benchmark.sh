@@ -63,21 +63,36 @@ update_cluster_credentials() {
             -e AWS_SESSION_TOKEN='${AWS_SESSION_TOKEN}' \
             presto-coordinator:latest
     " 2>/dev/null
-    
-    # Write credentials to temp file for workers
-    cat > /tmp/aws_creds_update.env << CREDSEOF
-AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
-CREDSEOF
 
-    # Update workers - rewrite systemd service to avoid sed escaping issues
+    # Update workers - create service file on each worker with dynamic memory
     for ip in $(terraform output -json worker_public_ips 2>/dev/null | jq -r '.[]' 2>/dev/null); do
-        scp -i "${SSH_KEY}" -o StrictHostKeyChecking=no /tmp/aws_creds_update.env ec2-user@$ip:/tmp/ 2>/dev/null
-        ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=5 ec2-user@$ip '
-            source /tmp/aws_creds_update.env
-            MEM=$(grep "memory=" /etc/systemd/system/presto.service 2>/dev/null | head -1 | grep -oP "\d+" || echo "58")
-            [ -z "$MEM" ] && MEM=58
+        ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=5 ec2-user@$ip "
+            # Calculate memory based on instance size (use 85% of total RAM)
+            TOTAL_RAM_GB=\$(free -g | awk '/^Mem:/{print \$2}')
+            if [ -z \"\$TOTAL_RAM_GB\" ] || [ \"\$TOTAL_RAM_GB\" = \"0\" ]; then
+                TOTAL_RAM_MB=\$(free -m | awk '/^Mem:/{print \$2}')
+                TOTAL_RAM_GB=\$((TOTAL_RAM_MB / 1024))
+            fi
+            # Use 85% for docker, leave headroom for OS
+            DOCKER_MEM=\$((TOTAL_RAM_GB * 85 / 100))
+            # For SF3000, cap at 54GB per worker to prevent OOM on Q21
+            if [ \"\$DOCKER_MEM\" -gt 54 ]; then DOCKER_MEM=54; fi
+            if [ \"\$DOCKER_MEM\" -lt 8 ]; then DOCKER_MEM=8; fi
+            
+            # Update config.properties with optimized memory settings
+            sudo sed -i \"s/system-memory-gb=.*/system-memory-gb=\${DOCKER_MEM}/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/query-memory-gb=.*/query-memory-gb=\${DOCKER_MEM}/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/query.max-memory-per-node=.*/query.max-memory-per-node=\${DOCKER_MEM}GB/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/query.max-total-memory-per-node=.*/query.max-total-memory-per-node=\${DOCKER_MEM}GB/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i \"s/system-mem-limit-gb=.*/system-mem-limit-gb=\${DOCKER_MEM}/\" /opt/presto/etc/config.properties 2>/dev/null || true
+            
+            # Ensure SF3000 optimizations are applied
+            grep -q 'global-arbitration-enabled' /opt/presto/etc/config.properties || echo 'global-arbitration-enabled=true' | sudo tee -a /opt/presto/etc/config.properties > /dev/null
+            grep -q 'memory-pool-abort-capacity-limit' /opt/presto/etc/config.properties || echo 'memory-pool-abort-capacity-limit=40GB' | sudo tee -a /opt/presto/etc/config.properties > /dev/null
+            # Reduce concurrency for memory-intensive queries
+            sudo sed -i 's/task.concurrency=.*/task.concurrency=8/' /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i 's/task.max-worker-threads=.*/task.max-worker-threads=8/' /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i 's/task.max-drivers-per-task=.*/task.max-drivers-per-task=8/' /opt/presto/etc/config.properties 2>/dev/null || true
             
             sudo tee /etc/systemd/system/presto.service > /dev/null << SVCEOF
 [Unit]
@@ -90,21 +105,7 @@ Type=simple
 User=root
 ExecStartPre=-/usr/bin/docker stop presto-worker
 ExecStartPre=-/usr/bin/docker rm presto-worker
-ExecStart=/usr/bin/docker run --rm \
-  --name presto-worker \
-  --network host \
-  --memory=${MEM}g \
-  --memory-swap=${MEM}g \
-  -v /opt/presto/etc:/opt/presto-server/etc:ro \
-  -v /var/presto/data:/var/presto/data \
-  -v /var/presto/catalog:/var/presto/catalog \
-  -v /var/presto/cache:/var/presto/cache \
-  -e LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64:/usr/lib:/usr/lib64 \
-  -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
-  -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
-  -e AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN} \
-  presto-native-cpu:latest \
-  --etc_dir=/opt/presto-server/etc --logtostderr=1 --v=1
+ExecStart=/usr/bin/docker run --rm --name presto-worker --network host --memory=\${DOCKER_MEM}g --memory-swap=\${DOCKER_MEM}g -v /opt/presto/etc:/opt/presto-server/etc:ro -v /var/presto/data:/var/presto/data -v /var/presto/catalog:/var/presto/catalog -v /var/presto/cache:/var/presto/cache -e LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64:/usr/lib:/usr/lib64 -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} -e AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN} presto-native-cpu:latest --etc_dir=/opt/presto-server/etc --logtostderr=1 --v=1
 ExecStop=/usr/bin/docker stop presto-worker
 Restart=always
 RestartSec=10
@@ -114,10 +115,9 @@ WantedBy=multi-user.target
 SVCEOF
             sudo systemctl daemon-reload
             sudo systemctl restart presto
-        ' 2>/dev/null &
+        " 2>/dev/null &
     done
     wait
-    rm -f /tmp/aws_creds_update.env
     
     echo -e "${GREEN}✓ Cluster credentials updated${NC}"
     
@@ -182,6 +182,12 @@ SCHEMA_NAME="$2"
 ANALYZE_FIRST="$3"
 
 PRESTO="presto --server localhost:8080 --catalog hive --schema ${SCHEMA_NAME}"
+
+# Install bc if not present (needed for runtime calculation)
+if ! command -v bc &>/dev/null; then
+    echo "Installing bc..."
+    sudo dnf install -y bc 2>/dev/null || sudo yum install -y bc 2>/dev/null || true
+fi
 
 # Clear OS cache
 echo "Clearing OS cache..."

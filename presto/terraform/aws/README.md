@@ -8,6 +8,7 @@ Deploy Presto clusters with Java coordinator and Native (Velox) workers on AWS.
 - **Workers:** Presto Native with Velox (C++ execution engine)
 - **Metadata:** AWS Glue Data Catalog
 - **Storage:** S3 parquet files (TPC-H datasets)
+- **Caching:** AsyncDataCache on NVMe SSDs (r7gd instances)
 
 ## Quick Start
 
@@ -20,12 +21,14 @@ Deploy Presto clusters with Java coordinator and Native (Velox) workers on AWS.
 ### Deploy Cluster
 
 ```bash
-
 # Show all options
 ./deploy_cluster.sh --help
 
 # Deploy medium cluster with SF100 benchmark
 ./deploy_cluster.sh --size medium --benchmark 100
+
+# Deploy Graviton cluster with SF3000 (recommended for large benchmarks)
+./deploy_cluster.sh --workers 32 --instance r7gd.2xlarge --benchmark 3000
 ```
 
 ## Usage Examples
@@ -56,9 +59,9 @@ Deploy Presto clusters with Java coordinator and Native (Velox) workers on AWS.
 ./deploy_cluster.sh --size cost-optimized-small --benchmark 3000
 ```
 
-### Graviton (ARM) Clusters
+### Graviton (ARM) Clusters - Recommended for SF3000
 
-~15% cheaper with local NVMe SSD for caching.
+Graviton instances are ~15% cheaper with local NVMe SSD for AsyncDataCache.
 
 ```bash
 # Medium Graviton cluster
@@ -66,9 +69,32 @@ Deploy Presto clusters with Java coordinator and Native (Velox) workers on AWS.
 
 # Large Graviton with custom worker count
 ./deploy_cluster.sh --size graviton-large --workers 8 --benchmark 3000
+
+# SF3000 validated configuration (32 x r7gd.2xlarge)
+# All 22 TPC-H queries pass in ~23 minutes
+./deploy_cluster.sh --workers 32 --instance r7gd.2xlarge --benchmark 3000
 ```
 
-**Note:** Graviton requires ARM64 images. Use `--build` to compile or ensure ARM64 images exist in S3.
+**Note:** Graviton requires ARM64 images. The deploy script auto-selects the correct image based on instance architecture.
+
+### Run TPC-H Benchmark
+
+```bash
+# Run benchmark with auto credential refresh
+./run_tpch_benchmark.sh 3000
+
+# Run benchmark with custom output file
+./run_tpch_benchmark.sh 3000 results/my_benchmark.csv
+
+# Skip table analysis (faster, use cached stats)
+./run_tpch_benchmark.sh 3000 results/run2.csv false
+```
+
+The benchmark script automatically:
+- Refreshes AWS credentials via `nvsec awsos get-creds`
+- Updates credentials on coordinator and all workers
+- Runs all 22 TPC-H queries
+- Outputs CSV with timing results
 
 ### Build Fresh Images
 
@@ -173,6 +199,47 @@ Pre-generated parquet data in S3:
 | SF1000 | 1TB | 6B | `s3://rapids-db-io-us-east-1/tpch/sf1000/` |
 | SF3000 | 3TB | 18B | `s3://rapids-db-io-us-east-1/tpch/sf3000/` |
 
+## SF3000 Validated Configuration
+
+The following configuration has been tested and passes all 22 TPC-H queries:
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Instance Type | r7gd.2xlarge | Graviton3 + 474GB NVMe |
+| Worker Count | 32 | ~2TB total RAM |
+| Memory/Worker | 54GB | Reduced from 64GB for Q21 |
+| Task Concurrency | 8 | Reduced from 16 for memory |
+| Global Arbitration | enabled | Better memory management |
+| AsyncDataCache | 352GB/node | Uses NVMe SSD |
+
+### Apply SF3000 Config to Running Cluster
+
+```bash
+# Using the config script
+./configs/apply_sf3000_config.sh <coordinator_ip> <worker_ips_file> <ssh_key>
+
+# Or deploy with auto-tuning (SF3000 config applied automatically)
+./deploy_cluster.sh --workers 32 --instance r7gd.2xlarge --benchmark 3000
+```
+
+### SF3000 Benchmark Results (r7gd.2xlarge × 32)
+
+| Query | Runtime | Query | Runtime |
+|-------|---------|-------|---------|
+| Q1 | 46.0s | Q12 | 45.4s |
+| Q2 | 20.0s | Q13 | 36.1s |
+| Q3 | 56.4s | Q14 | 38.8s |
+| Q4 | 42.8s | Q15 | 42.3s |
+| Q5 | 86.2s | Q16 | 12.5s |
+| Q6 | 25.5s | Q17 | 100.7s |
+| Q7 | 73.3s | Q18 | 102.6s |
+| Q8 | 70.5s | Q19 | 56.4s |
+| Q9 | 100.2s | Q20 | 51.2s |
+| Q10 | 52.2s | Q21 | 191.5s |
+| Q11 | 16.4s | Q22 | 18.0s |
+
+**Total: 1,365s (22.75 min) | All 22 queries passed ✓**
+
 ## Configuration
 
 ### terraform.tfvars
@@ -248,8 +315,12 @@ ssh ec2-user@<coordinator-ip> 'aws s3 ls s3://rapids-db-io-us-east-1/tpch/'
 aws/
 ├── deploy_cluster.sh             # Main deployment script (recommended)
 ├── deploy_presto.sh              # Interactive deployment
-├── run_tpch_benchmark.sh         # Benchmark runner
+├── run_tpch_benchmark.sh         # Benchmark runner (auto-refreshes credentials)
 ├── populate_tpch_from_s3_equivalent.sh  # Table registration
+├── configs/
+│   ├── sf3000_r7gd_2xlarge_32nodes.json  # Validated SF3000 config
+│   └── apply_sf3000_config.sh            # Apply config to running cluster
+├── results/                      # Benchmark results (CSV files)
 ├── lib/
 │   └── instance_config.sh        # Dynamic config library
 ├── main.tf                       # Infrastructure
@@ -258,7 +329,7 @@ aws/
 ├── terraform.tfvars              # Configuration (gitignored)
 └── user-data/
     ├── coordinator_java.sh       # Coordinator setup
-    ├── worker_native.sh          # Worker setup (x86)
+    ├── worker_native.sh          # Worker setup (auto-selects ARM64/x86)
     ├── build_s3a_complete.sh     # Build script (x86)
     └── build_arm64.sh            # Build script (ARM64)
 ```
