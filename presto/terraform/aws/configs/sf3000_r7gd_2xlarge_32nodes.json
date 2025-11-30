@@ -1,0 +1,105 @@
+{
+  "benchmark": {
+    "name": "TPC-H SF3000",
+    "scale_factor": 3000,
+    "data_size_tb": 3,
+    "queries": 22,
+    "all_passed": true,
+    "total_runtime_seconds": 1365.0,
+    "date": "2024-11-30"
+  },
+  "cluster": {
+    "coordinator": {
+      "instance_type": "r7gd.2xlarge",
+      "count": 1,
+      "arch": "arm64",
+      "image": "s3://rapids-db-io-us-east-1/docker-images/presto-coordinator-arm64-latest.tar.gz"
+    },
+    "workers": {
+      "instance_type": "r7gd.2xlarge",
+      "count": 32,
+      "arch": "arm64",
+      "image": "s3://rapids-db-io-us-east-1/docker-images/presto-worker-arm64-latest.tar.gz",
+      "specs": {
+        "vcpus": 8,
+        "memory_gb": 64,
+        "nvme_storage_gb": 474
+      }
+    }
+  },
+  "worker_config": {
+    "memory": {
+      "system_memory_gb": 54,
+      "query_memory_gb": 54,
+      "query_max_memory_per_node": "54GB",
+      "query_max_total_memory_per_node": "54GB",
+      "system_mem_limit_gb": 54,
+      "system_mem_shrink_gb": 20,
+      "docker_memory_limit_gb": 58,
+      "notes": "Reduced from 64GB total to 54GB usable to prevent OOM on Q21"
+    },
+    "concurrency": {
+      "task_concurrency": 8,
+      "task_max_worker_threads": 8,
+      "task_max_drivers_per_task": 8,
+      "notes": "Reduced from 16 to 8 for memory-intensive queries like Q21"
+    },
+    "memory_arbitrator": {
+      "memory_arbitrator_kind": "SHARED",
+      "global_arbitration_enabled": true,
+      "memory_pool_abort_capacity_limit": "40GB",
+      "notes": "Global arbitration helps manage memory across concurrent tasks"
+    },
+    "cache": {
+      "async_data_cache_enabled": true,
+      "async_cache_ssd_gb": 352,
+      "async_cache_ssd_path": "/var/presto/cache",
+      "async_cache_ssd_checkpoint_enabled": true,
+      "notes": "Uses NVMe instance storage for S3 data caching"
+    },
+    "spill": {
+      "experimental_spill_enabled": true,
+      "spiller_spill_path": "/var/presto/data/spill",
+      "notes": "Spill enabled but not required for SF3000 with these memory settings"
+    }
+  },
+  "coordinator_config": {
+    "memory": {
+      "query_max_memory": "1700GB",
+      "query_max_total_memory": "1700GB",
+      "query_max_memory_per_node": "15GB",
+      "query_max_total_memory_per_node": "15GB",
+      "notes": "Distributed limit = 32 workers × 54GB ≈ 1700GB"
+    }
+  },
+  "system_tuning": {
+    "vm_overcommit_memory": 1,
+    "vm_overcommit_ratio": 100,
+    "notes": "Required for Velox memory allocator"
+  },
+  "query_results": {
+    "Q1": {"status": "success", "runtime_seconds": 45.99},
+    "Q2": {"status": "success", "runtime_seconds": 19.97},
+    "Q3": {"status": "success", "runtime_seconds": 56.43},
+    "Q4": {"status": "success", "runtime_seconds": 42.78},
+    "Q5": {"status": "success", "runtime_seconds": 86.24},
+    "Q6": {"status": "success", "runtime_seconds": 25.45},
+    "Q7": {"status": "success", "runtime_seconds": 73.34},
+    "Q8": {"status": "success", "runtime_seconds": 70.53},
+    "Q9": {"status": "success", "runtime_seconds": 100.18},
+    "Q10": {"status": "success", "runtime_seconds": 52.16},
+    "Q11": {"status": "success", "runtime_seconds": 16.39},
+    "Q12": {"status": "success", "runtime_seconds": 45.42},
+    "Q13": {"status": "success", "runtime_seconds": 36.14},
+    "Q14": {"status": "success", "runtime_seconds": 38.85},
+    "Q15": {"status": "success", "runtime_seconds": 42.34},
+    "Q16": {"status": "success", "runtime_seconds": 12.47},
+    "Q17": {"status": "success", "runtime_seconds": 100.70},
+    "Q18": {"status": "success", "runtime_seconds": 102.58},
+    "Q19": {"status": "success", "runtime_seconds": 56.38},
+    "Q20": {"status": "success", "runtime_seconds": 51.16},
+    "Q21": {"status": "success", "runtime_seconds": 191.54, "notes": "Memory-intensive, requires reduced concurrency + global arbitration"},
+    "Q22": {"status": "success", "runtime_seconds": 17.95}
+  }
+}
+

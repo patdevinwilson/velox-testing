@@ -6,6 +6,7 @@ set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 SSH_KEY="${HOME}/.ssh/rapids-db-io.pem"
+TFVARS_FILE="${SCRIPT_DIR}/terraform.tfvars"
 
 # Colors
 RED='\033[0;31m'
@@ -15,6 +16,121 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 cd "${SCRIPT_DIR}"
+
+# Refresh AWS credentials before benchmark
+refresh_credentials() {
+    echo -e "${BLUE}Refreshing AWS credentials...${NC}"
+    
+    if command -v nvsec &>/dev/null; then
+        CREDS=$(echo "0" | nvsec awsos get-creds --aws-profile default 2>/dev/null | grep -E "aws_access_key_id|aws_secret_access_key|aws_session_token")
+        if [ -n "$CREDS" ]; then
+            export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | grep "aws_access_key_id" | cut -d'=' -f2 | tr -d ' ')
+            export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | grep "aws_secret_access_key" | cut -d'=' -f2 | tr -d ' ')
+            export AWS_SESSION_TOKEN=$(echo "$CREDS" | grep "aws_session_token" | cut -d'=' -f2 | tr -d ' ')
+            
+            # Update terraform.tfvars
+            sed -i.bak '/^aws_access_key_id/d; /^aws_secret_access_key/d; /^aws_session_token/d' "${TFVARS_FILE}" 2>/dev/null || true
+            cat >> "${TFVARS_FILE}" <<EOF
+
+# AWS Credentials (auto-refreshed $(date '+%Y-%m-%d %H:%M:%S'))
+aws_access_key_id     = "${AWS_ACCESS_KEY_ID}"
+aws_secret_access_key = "${AWS_SECRET_ACCESS_KEY}"
+aws_session_token     = "${AWS_SESSION_TOKEN}"
+EOF
+            echo -e "${GREEN}✓ Credentials refreshed${NC}"
+        else
+            echo -e "${YELLOW}Warning: Could not get credentials from nvsec${NC}"
+        fi
+    else
+        echo -e "${YELLOW}Warning: nvsec not available, using existing credentials${NC}"
+    fi
+}
+
+# Update credentials on all cluster nodes
+update_cluster_credentials() {
+    local coordinator_ip="$1"
+    
+    echo -e "${BLUE}Updating credentials on cluster nodes...${NC}"
+    
+    # Update coordinator
+    ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no ec2-user@${coordinator_ip} "
+        docker rm -f presto-coordinator 2>/dev/null || true
+        docker run -d --name presto-coordinator --rm \
+            --network host \
+            -v /opt/presto/etc:/opt/presto-server/etc:ro \
+            -e AWS_ACCESS_KEY_ID='${AWS_ACCESS_KEY_ID}' \
+            -e AWS_SECRET_ACCESS_KEY='${AWS_SECRET_ACCESS_KEY}' \
+            -e AWS_SESSION_TOKEN='${AWS_SESSION_TOKEN}' \
+            presto-coordinator:latest
+    " 2>/dev/null
+    
+    # Write credentials to temp file for workers
+    cat > /tmp/aws_creds_update.env << CREDSEOF
+AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+CREDSEOF
+
+    # Update workers - rewrite systemd service to avoid sed escaping issues
+    for ip in $(terraform output -json worker_public_ips 2>/dev/null | jq -r '.[]' 2>/dev/null); do
+        scp -i "${SSH_KEY}" -o StrictHostKeyChecking=no /tmp/aws_creds_update.env ec2-user@$ip:/tmp/ 2>/dev/null
+        ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=5 ec2-user@$ip '
+            source /tmp/aws_creds_update.env
+            MEM=$(grep "memory=" /etc/systemd/system/presto.service 2>/dev/null | head -1 | grep -oP "\d+" || echo "58")
+            [ -z "$MEM" ] && MEM=58
+            
+            sudo tee /etc/systemd/system/presto.service > /dev/null << SVCEOF
+[Unit]
+Description=Presto Native Worker
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=-/usr/bin/docker stop presto-worker
+ExecStartPre=-/usr/bin/docker rm presto-worker
+ExecStart=/usr/bin/docker run --rm \
+  --name presto-worker \
+  --network host \
+  --memory=${MEM}g \
+  --memory-swap=${MEM}g \
+  -v /opt/presto/etc:/opt/presto-server/etc:ro \
+  -v /var/presto/data:/var/presto/data \
+  -v /var/presto/catalog:/var/presto/catalog \
+  -v /var/presto/cache:/var/presto/cache \
+  -e LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64:/usr/lib:/usr/lib64 \
+  -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
+  -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
+  -e AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN} \
+  presto-native-cpu:latest \
+  --etc_dir=/opt/presto-server/etc --logtostderr=1 --v=1
+ExecStop=/usr/bin/docker stop presto-worker
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+            sudo systemctl daemon-reload
+            sudo systemctl restart presto
+        ' 2>/dev/null &
+    done
+    wait
+    rm -f /tmp/aws_creds_update.env
+    
+    echo -e "${GREEN}✓ Cluster credentials updated${NC}"
+    
+    # Wait for workers to reconnect
+    echo "Waiting for workers to reconnect..."
+    sleep 25
+    
+    ACTIVE=$(curl -s http://${coordinator_ip}:8080/v1/cluster 2>/dev/null | jq '.activeWorkers' 2>/dev/null || echo "0")
+    echo "Active workers: ${ACTIVE}"
+}
+
+# Refresh credentials
+refresh_credentials
 
 # Parse arguments
 SCALE_FACTOR="${1:-}"
@@ -27,6 +143,9 @@ if [ -z "${COORDINATOR_IP}" ]; then
     echo -e "${RED}ERROR: Could not get coordinator IP. Is the cluster deployed?${NC}"
     exit 1
 fi
+
+# Update credentials on cluster nodes
+update_cluster_credentials "${COORDINATOR_IP}"
 
 # Get scale factor from terraform.tfvars if not provided
 if [ -z "${SCALE_FACTOR}" ]; then

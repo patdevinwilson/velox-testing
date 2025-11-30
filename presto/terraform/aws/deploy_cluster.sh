@@ -351,8 +351,71 @@ wait_for_cluster() {
     return 1
 }
 
+apply_sf_config() {
+    local coordinator_ip="$1"
+    local sf="$2"
+    
+    # Refresh credentials before applying config
+    log "Refreshing AWS credentials before configuration..."
+    refresh_credentials
+    
+    # Apply scale-factor-specific memory/concurrency tuning
+    # These settings were tested and validated for each scale factor
+    
+    if [ "$sf" -ge 3000 ]; then
+        log "Applying SF3000 optimized configuration..."
+        
+        # SF3000 requires:
+        # - Reduced memory (54GB) to prevent OOM on Q21
+        # - Lower concurrency (8) for memory-intensive queries
+        # - Global arbitration for better memory management
+        local MEMORY_GB=54
+        local CONCURRENCY=8
+        local DOCKER_MEMORY_GB=58
+        local COORD_QUERY_MEM="1700GB"
+        
+        # Update coordinator
+        ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no ec2-user@${coordinator_ip} "
+            sudo sed -i 's/query.max-memory=.*/query.max-memory=${COORD_QUERY_MEM}/' /opt/presto/etc/config.properties 2>/dev/null || true
+            sudo sed -i 's/query.max-total-memory=.*/query.max-total-memory=${COORD_QUERY_MEM}/' /opt/presto/etc/config.properties 2>/dev/null || true
+        " 2>/dev/null || true
+        
+        # Update workers
+        cd "${SCRIPT_DIR}"
+        for ip in $(terraform output -json worker_public_ips 2>/dev/null | jq -r '.[]' 2>/dev/null); do
+            ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=5 ec2-user@$ip "
+                sudo sed -i 's/system-memory-gb=[0-9]*/system-memory-gb=${MEMORY_GB}/' /opt/presto/etc/config.properties
+                sudo sed -i 's/query-memory-gb=[0-9]*/query-memory-gb=${MEMORY_GB}/' /opt/presto/etc/config.properties
+                sudo sed -i 's/query.max-memory-per-node=[0-9]*GB/query.max-memory-per-node=${MEMORY_GB}GB/' /opt/presto/etc/config.properties
+                sudo sed -i 's/query.max-total-memory-per-node=[0-9]*GB/query.max-total-memory-per-node=${MEMORY_GB}GB/' /opt/presto/etc/config.properties
+                sudo sed -i 's/system-mem-limit-gb=[0-9]*/system-mem-limit-gb=${MEMORY_GB}/' /opt/presto/etc/config.properties
+                sudo sed -i 's/task.concurrency=[0-9]*/task.concurrency=${CONCURRENCY}/' /opt/presto/etc/config.properties
+                sudo sed -i 's/task.max-worker-threads=[0-9]*/task.max-worker-threads=${CONCURRENCY}/' /opt/presto/etc/config.properties
+                sudo sed -i 's/task.max-drivers-per-task=[0-9]*/task.max-drivers-per-task=${CONCURRENCY}/' /opt/presto/etc/config.properties
+                grep -q 'global-arbitration-enabled' /opt/presto/etc/config.properties || echo 'global-arbitration-enabled=true' | sudo tee -a /opt/presto/etc/config.properties > /dev/null
+                grep -q 'memory-pool-abort-capacity-limit' /opt/presto/etc/config.properties || echo 'memory-pool-abort-capacity-limit=40GB' | sudo tee -a /opt/presto/etc/config.properties > /dev/null
+                sudo sed -i 's/--memory=[0-9]*g/--memory=${DOCKER_MEMORY_GB}g/' /etc/systemd/system/presto.service
+                sudo sed -i 's/--memory-swap=[0-9]*g/--memory-swap=${DOCKER_MEMORY_GB}g/' /etc/systemd/system/presto.service
+                sudo systemctl daemon-reload
+                sudo systemctl restart presto
+            " 2>/dev/null &
+        done
+        wait
+        
+        log "✓ SF3000 config applied (memory=${MEMORY_GB}GB, concurrency=${CONCURRENCY})"
+        sleep 20  # Wait for workers to reconnect
+        
+    elif [ "$sf" -ge 1000 ]; then
+        log "Using default SF1000 configuration"
+        # Default config works well for SF1000
+    fi
+}
+
 run_post_deploy() {
     local coordinator_ip="$1"
+    
+    # Apply scale-factor-specific tuning
+    apply_sf_config "${coordinator_ip}" "${SCALE_FACTOR}"
     
     # Populate TPC-H tables
     log "Populating TPC-H SF${SCALE_FACTOR} tables..."
