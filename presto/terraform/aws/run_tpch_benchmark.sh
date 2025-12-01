@@ -75,27 +75,26 @@ update_cluster_credentials() {
             fi
             
             # Memory allocation based on instance RAM:
-            # - Leave 15-20% headroom for OS and Q21 memory spikes
-            # - Larger instances can use higher percentage
-            if [ \"\$TOTAL_RAM_GB\" -ge 256 ]; then
-                # 256GB+ instances (r7gd.8xlarge+): use 85%, cap at 200GB
-                DOCKER_MEM=\$((TOTAL_RAM_GB * 85 / 100))
-                if [ \"\$DOCKER_MEM\" -gt 200 ]; then DOCKER_MEM=200; fi
-                PRESTO_MEM=\$((DOCKER_MEM - 8))
-                CONCURRENCY=32
+            # - Leave 20-30% headroom for OS and Q21 memory spikes
+            # - Q21 is memory-intensive and needs extra headroom
+            if [ \"\$TOTAL_RAM_GB\" -ge 240 ]; then
+                # 256GB+ instances (r7gd.8xlarge+): use 75%, cap at 180GB for Q21 safety
+                DOCKER_MEM=200
+                PRESTO_MEM=180
+                CONCURRENCY=16
             elif [ \"\$TOTAL_RAM_GB\" -ge 120 ]; then
-                # 128GB instances (r7gd.4xlarge): use 85%, ~100GB for Presto
-                DOCKER_MEM=\$((TOTAL_RAM_GB * 85 / 100))
-                PRESTO_MEM=\$((DOCKER_MEM - 8))
+                # 128GB instances (r7gd.4xlarge): use 80%, cap at 100GB
+                DOCKER_MEM=108
+                PRESTO_MEM=100
                 CONCURRENCY=16
             elif [ \"\$TOTAL_RAM_GB\" -ge 60 ]; then
-                # 64GB instances (r7gd.2xlarge): use 85%, cap at 54GB for Q21
-                DOCKER_MEM=\$((TOTAL_RAM_GB * 90 / 100))
+                # 64GB instances (r7gd.2xlarge): cap at 54GB for Q21
+                DOCKER_MEM=58
                 PRESTO_MEM=54
                 CONCURRENCY=8
             else
-                # Smaller instances: use 80%
-                DOCKER_MEM=\$((TOTAL_RAM_GB * 80 / 100))
+                # Smaller instances: use 75%
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 75 / 100))
                 PRESTO_MEM=\$((DOCKER_MEM - 4))
                 CONCURRENCY=8
             fi
