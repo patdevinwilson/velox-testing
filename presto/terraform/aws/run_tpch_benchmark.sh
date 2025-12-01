@@ -74,32 +74,46 @@ update_cluster_credentials() {
                 TOTAL_RAM_GB=\$((TOTAL_RAM_MB / 1024))
             fi
             
+            # Get vCPU count for concurrency
+            VCPUS=\$(nproc)
+            
             # Memory allocation based on instance RAM:
-            # - Leave 20-30% headroom for OS and Q21 memory spikes
-            # - Q21 is memory-intensive and needs extra headroom
-            if [ \"\$TOTAL_RAM_GB\" -ge 240 ]; then
-                # 256GB+ instances (r7gd.8xlarge+): use 75%, cap at 180GB for Q21 safety
-                DOCKER_MEM=200
-                PRESTO_MEM=180
-                CONCURRENCY=16
+            # - Use 95% of RAM for large instances, less for smaller
+            # - Concurrency matches vCPU count
+            if [ \"\$TOTAL_RAM_GB\" -ge 480 ]; then
+                # 512GB instances (r7gd.16xlarge): 95% utilization
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 95 / 100))
+                PRESTO_MEM=\$((DOCKER_MEM - 10))
+                CONCURRENCY=\$VCPUS
+            elif [ \"\$TOTAL_RAM_GB\" -ge 240 ]; then
+                # 256GB instances (r7gd.8xlarge): 90% utilization
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 90 / 100))
+                PRESTO_MEM=\$((DOCKER_MEM - 10))
+                CONCURRENCY=\$VCPUS
             elif [ \"\$TOTAL_RAM_GB\" -ge 120 ]; then
-                # 128GB instances (r7gd.4xlarge): use 80%, cap at 100GB
-                DOCKER_MEM=108
-                PRESTO_MEM=100
-                CONCURRENCY=16
+                # 128GB instances (r7gd.4xlarge): 85% utilization
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 85 / 100))
+                PRESTO_MEM=\$((DOCKER_MEM - 8))
+                CONCURRENCY=\$VCPUS
             elif [ \"\$TOTAL_RAM_GB\" -ge 60 ]; then
                 # 64GB instances (r7gd.2xlarge): cap at 54GB for Q21
                 DOCKER_MEM=58
                 PRESTO_MEM=54
-                CONCURRENCY=8
+                CONCURRENCY=\$VCPUS
             else
-                # Smaller instances: use 75%
-                DOCKER_MEM=\$((TOTAL_RAM_GB * 75 / 100))
+                # Smaller instances: use 80%
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 80 / 100))
                 PRESTO_MEM=\$((DOCKER_MEM - 4))
-                CONCURRENCY=8
+                CONCURRENCY=\$((VCPUS > 8 ? VCPUS : 8))
             fi
+            
+            # Ensure minimums
             if [ \"\$DOCKER_MEM\" -lt 8 ]; then DOCKER_MEM=8; fi
             if [ \"\$PRESTO_MEM\" -lt 4 ]; then PRESTO_MEM=4; fi
+            if [ \"\$CONCURRENCY\" -lt 4 ]; then CONCURRENCY=4; fi
+            
+            # Round concurrency to power of 2 for Presto
+            CONCURRENCY=\$(awk -v n=\"\$CONCURRENCY\" 'BEGIN { p=1; while(p*2<=n) p*=2; print p }')
             
             # Update config.properties with optimized memory settings
             sudo sed -i \"s/system-memory-gb=.*/system-memory-gb=\${PRESTO_MEM}/\" /opt/presto/etc/config.properties 2>/dev/null || true
@@ -115,7 +129,8 @@ update_cluster_credentials() {
             grep -q 'global-arbitration-enabled' /opt/presto/etc/config.properties || echo 'global-arbitration-enabled=true' | sudo tee -a /opt/presto/etc/config.properties > /dev/null
             sudo sed -i \"s/memory-pool-abort-capacity-limit=.*/memory-pool-abort-capacity-limit=\${ABORT_LIMIT}GB/\" /opt/presto/etc/config.properties 2>/dev/null || true
             
-            # Set concurrency based on instance size
+            # Set concurrency based on vCPU count
+            echo \"Setting concurrency to \${CONCURRENCY} (vCPUs: \${VCPUS}, RAM: \${TOTAL_RAM_GB}GB)\"
             sudo sed -i \"s/task.concurrency=.*/task.concurrency=\${CONCURRENCY}/\" /opt/presto/etc/config.properties 2>/dev/null || true
             sudo sed -i \"s/task.max-worker-threads=.*/task.max-worker-threads=\${CONCURRENCY}/\" /opt/presto/etc/config.properties 2>/dev/null || true
             sudo sed -i \"s/task.max-drivers-per-task=.*/task.max-drivers-per-task=\${CONCURRENCY}/\" /opt/presto/etc/config.properties 2>/dev/null || true

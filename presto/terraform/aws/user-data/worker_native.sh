@@ -204,16 +204,9 @@ else
 fi
 if [ "$BUFFER_MEM_GB" -gt "$BUFFER_CAP" ]; then BUFFER_MEM_GB=$BUFFER_CAP; fi
 
-# Task concurrency: For Native, use vCPU count directly (not multiplied)
-# For large scale factors, increase slightly
-if [ "$SCALE_FACTOR" -ge 1000 ]; then
-  TASK_CONCURRENCY=$((VCPUS * 2))
-else
-  TASK_CONCURRENCY=$${VCPUS}
-fi
-
-# Cap at 64 for stability
-if [ "$TASK_CONCURRENCY" -gt 64 ]; then TASK_CONCURRENCY=64; fi
+# Task concurrency: Match vCPU count for optimal parallelization
+# Presto Native benefits from high concurrency on large instances
+TASK_CONCURRENCY=$${VCPUS}
 
 # Presto requires power of 2 - round down to nearest power of 2
 TASK_CONCURRENCY=$(awk -v n="$TASK_CONCURRENCY" 'BEGIN {
