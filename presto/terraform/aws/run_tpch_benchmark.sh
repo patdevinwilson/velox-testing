@@ -81,19 +81,19 @@ update_cluster_credentials() {
             # - Use 95% of RAM for large instances, less for smaller
             # - Concurrency matches vCPU count
             if [ \"\$TOTAL_RAM_GB\" -ge 480 ]; then
-                # 512GB instances (r7gd.16xlarge): 95% utilization
+                # 512GB instances (r7gd.16xlarge): 95% Docker, leave 50GB headroom for Presto
                 DOCKER_MEM=\$((TOTAL_RAM_GB * 95 / 100))
-                PRESTO_MEM=\$((DOCKER_MEM - 10))
+                PRESTO_MEM=\$((DOCKER_MEM - 50))
                 CONCURRENCY=\$VCPUS
             elif [ \"\$TOTAL_RAM_GB\" -ge 240 ]; then
-                # 256GB instances (r7gd.8xlarge): 90% utilization
+                # 256GB instances (r7gd.8xlarge): 90% Docker, leave 30GB headroom
                 DOCKER_MEM=\$((TOTAL_RAM_GB * 90 / 100))
-                PRESTO_MEM=\$((DOCKER_MEM - 10))
+                PRESTO_MEM=\$((DOCKER_MEM - 30))
                 CONCURRENCY=\$VCPUS
             elif [ \"\$TOTAL_RAM_GB\" -ge 120 ]; then
-                # 128GB instances (r7gd.4xlarge): 85% utilization
+                # 128GB instances (r7gd.4xlarge): 85% Docker, leave 15GB headroom
                 DOCKER_MEM=\$((TOTAL_RAM_GB * 85 / 100))
-                PRESTO_MEM=\$((DOCKER_MEM - 8))
+                PRESTO_MEM=\$((DOCKER_MEM - 15))
                 CONCURRENCY=\$VCPUS
             elif [ \"\$TOTAL_RAM_GB\" -ge 60 ]; then
                 # 64GB instances (r7gd.2xlarge): cap at 54GB for Q21

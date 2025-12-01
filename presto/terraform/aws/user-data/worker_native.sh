@@ -172,19 +172,26 @@ if [ -z "$${TOTAL_RAM_GB}" ]; then
   TOTAL_RAM_GB=64
 fi
 
-# Native Worker Memory Configuration (velox-testing params.json)
-# Native workers can utilize more memory than Java workers
-# System memory: 95% of total RAM (native_query_mem_percent_of_sys_mem: 0.95)
-# Buffer memory: 5% of system, capped at 32GB (native_buffer_mem_percent: 0.05)
-# Proxygen memory: 0.125GB per worker, capped at 2GB
+# Native Worker Memory Configuration
+# Leave headroom for Presto overhead (memory tracking, buffers, system)
+# Larger instances need more absolute headroom
 
-# System reserved: smaller for Native (5%, cap 2GB)
-SYSTEM_RESERVED_GB=$((TOTAL_RAM_GB * 5 / 100))
-if [ "$SYSTEM_RESERVED_GB" -gt 2 ]; then SYSTEM_RESERVED_GB=2; fi
-
-# Native can use 95% of remaining memory
-USABLE_RAM_GB=$((TOTAL_RAM_GB - SYSTEM_RESERVED_GB))
-WORKER_MEMORY_GB=$((USABLE_RAM_GB * 95 / 100))
+if [ "$TOTAL_RAM_GB" -ge 480 ]; then
+  # 512GB instances: leave 50GB headroom
+  WORKER_MEMORY_GB=$((TOTAL_RAM_GB - 50))
+elif [ "$TOTAL_RAM_GB" -ge 240 ]; then
+  # 256GB instances: leave 30GB headroom
+  WORKER_MEMORY_GB=$((TOTAL_RAM_GB - 30))
+elif [ "$TOTAL_RAM_GB" -ge 120 ]; then
+  # 128GB instances: leave 15GB headroom
+  WORKER_MEMORY_GB=$((TOTAL_RAM_GB - 15))
+elif [ "$TOTAL_RAM_GB" -ge 60 ]; then
+  # 64GB instances: cap at 54GB for Q21 safety
+  WORKER_MEMORY_GB=54
+else
+  # Smaller instances: use 80%
+  WORKER_MEMORY_GB=$((TOTAL_RAM_GB * 80 / 100))
+fi
 
 # Scale factor for configuration tuning
 SCALE_FACTOR="${benchmark_scale_factor}"
