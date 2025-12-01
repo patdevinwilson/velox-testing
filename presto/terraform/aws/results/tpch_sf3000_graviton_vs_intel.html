@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TPC-H SF3000: Graviton vs Intel Comparison</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #0D0D0D 0%, #1A1A1A 50%, #0D0D0D 100%);
+            color: #E0E0E0;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+            padding: 40px;
+            background: linear-gradient(180deg, rgba(118, 185, 0, 0.15) 0%, transparent 100%);
+            border-radius: 20px;
+            border: 1px solid rgba(118, 185, 0, 0.3);
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #76B900 0%, #00D4FF 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 15px;
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            color: #9E9E9E;
+            margin-bottom: 25px;
+        }
+        
+        .badge-row {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .badge {
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        
+        .badge.graviton {
+            background: linear-gradient(135deg, #76B900 0%, #5A8F00 100%);
+            color: #000;
+        }
+        
+        .badge.intel {
+            background: linear-gradient(135deg, #00D4FF 0%, #0088AA 100%);
+            color: #000;
+        }
+        
+        .section {
+            background: #1E1E1E;
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 1px solid #333;
+        }
+        
+        .section h2 {
+            font-size: 1.4rem;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #333;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .section h2.graviton {
+            color: #76B900;
+        }
+        
+        .section h2.intel {
+            color: #00D4FF;
+        }
+        
+        .section h2::before {
+            content: '';
+            width: 6px;
+            height: 28px;
+            border-radius: 3px;
+        }
+        
+        .section h2.graviton::before {
+            background: linear-gradient(180deg, #76B900, #93C90E);
+        }
+        
+        .section h2.intel::before {
+            background: linear-gradient(180deg, #00D4FF, #0088AA);
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 20px 0;
+        }
+        
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        
+        @media (max-width: 900px) {
+            .comparison-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .arch-card {
+            background: linear-gradient(145deg, #252525 0%, #1A1A1A 100%);
+            border-radius: 14px;
+            padding: 25px;
+            border: 2px solid;
+        }
+        
+        .arch-card.graviton {
+            border-color: #76B900;
+        }
+        
+        .arch-card.intel {
+            border-color: #00D4FF;
+        }
+        
+        .arch-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .arch-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+        
+        .arch-icon.graviton {
+            background: rgba(118, 185, 0, 0.2);
+        }
+        
+        .arch-icon.intel {
+            background: rgba(0, 212, 255, 0.2);
+        }
+        
+        .arch-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+        
+        .arch-subtitle {
+            font-size: 0.85rem;
+            color: #888;
+        }
+        
+        .config-table {
+            width: 100%;
+            margin-top: 15px;
+        }
+        
+        .config-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #333;
+        }
+        
+        .config-row:last-child {
+            border-bottom: none;
+        }
+        
+        .config-label {
+            color: #888;
+        }
+        
+        .config-value {
+            font-weight: 600;
+        }
+        
+        .config-value.best {
+            color: #76B900;
+        }
+        
+        .winner-tag {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            margin-left: 8px;
+        }
+        
+        .winner-tag.speed {
+            background: #00D4FF;
+            color: #000;
+        }
+        
+        .winner-tag.value {
+            background: #76B900;
+            color: #000;
+        }
+        
+        .insights-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        
+        .insight-card {
+            background: #252525;
+            border-radius: 12px;
+            padding: 20px;
+            border-left: 4px solid;
+        }
+        
+        .insight-card.graviton {
+            border-left-color: #76B900;
+        }
+        
+        .insight-card.intel {
+            border-left-color: #00D4FF;
+        }
+        
+        .insight-card.neutral {
+            border-left-color: #FFB800;
+        }
+        
+        .insight-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        
+        .insight-card.graviton .insight-title {
+            color: #76B900;
+        }
+        
+        .insight-card.intel .insight-title {
+            color: #00D4FF;
+        }
+        
+        .insight-card.neutral .insight-title {
+            color: #FFB800;
+        }
+        
+        .insight-text {
+            color: #B0B0B0;
+            line-height: 1.5;
+            font-size: 0.9rem;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 14px 12px;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+        
+        th {
+            background: #252525;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 0.5px;
+        }
+        
+        th.graviton {
+            color: #76B900;
+        }
+        
+        th.intel {
+            color: #00D4FF;
+        }
+        
+        tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        
+        .faster {
+            color: #76B900;
+            font-weight: 600;
+        }
+        
+        .cheaper {
+            color: #00D4FF;
+            font-weight: 600;
+        }
+        
+        footer {
+            text-align: center;
+            padding: 30px;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .verdict-box {
+            background: linear-gradient(135deg, rgba(118, 185, 0, 0.1) 0%, rgba(0, 212, 255, 0.1) 100%);
+            border: 1px solid #444;
+            border-radius: 16px;
+            padding: 30px;
+            text-align: center;
+            margin-top: 30px;
+        }
+        
+        .verdict-title {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            background: linear-gradient(135deg, #76B900 0%, #00D4FF 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .verdict-text {
+            color: #B0B0B0;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚡ Graviton vs Intel: TPC-H SF3000</h1>
+            <p class="subtitle">Presto Native with Velox — ARM64 (r7gd) vs x86 (r7i) Performance</p>
+            <div class="badge-row">
+                <span class="badge graviton">🦾 Graviton + NVMe Cache</span>
+                <span class="badge intel">💻 Intel x86 (EBS)</span>
+            </div>
+        </header>
+
+        <div class="comparison-grid">
+            <div class="arch-card graviton">
+                <div class="arch-header">
+                    <div class="arch-icon graviton">🦾</div>
+                    <div>
+                        <div class="arch-title">AWS Graviton (r7gd)</div>
+                        <div class="arch-subtitle">ARM64 + NVMe AsyncDataCache</div>
+                    </div>
+                </div>
+                <div class="config-table">
+                    <div class="config-row">
+                        <span class="config-label">Best Config</span>
+                        <span class="config-value">32× r7gd.2xlarge</span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">Runtime</span>
+                        <span class="config-value">22.8 min</span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">Hourly Cost</span>
+                        <span class="config-value">$19.35/hr</span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">Benchmark Cost</span>
+                        <span class="config-value">$7.34/run</span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">Storage</span>
+                        <span class="config-value best">NVMe SSD (474GB/node)</span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">AsyncDataCache</span>
+                        <span class="config-value best">✅ Enabled</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="arch-card intel">
+                <div class="arch-header">
+                    <div class="arch-icon intel">💻</div>
+                    <div>
+                        <div class="arch-title">Intel x86 (r7i)</div>
+                        <div class="arch-subtitle">x86_64 + EBS Storage</div>
+                    </div>
+                </div>
+                <div class="config-table">
+                    <div class="config-row">
+                        <span class="config-label">Best Config</span>
+                        <span class="config-value">32× r7i.2xlarge<span class="winner-tag speed">FASTEST</span></span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">Runtime</span>
+                        <span class="config-value">19.0 min<span class="winner-tag speed">17% faster</span></span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">Hourly Cost</span>
+                        <span class="config-value">$16.00/hr<span class="winner-tag value">CHEAPER</span></span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">Benchmark Cost</span>
+                        <span class="config-value">$5.10/run<span class="winner-tag value">30% less</span></span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">Storage</span>
+                        <span class="config-value">EBS only</span>
+                    </div>
+                    <div class="config-row">
+                        <span class="config-label">AsyncDataCache</span>
+                        <span class="config-value">❌ Disabled</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="graviton">Runtime Comparison (minutes)</h2>
+            <div class="chart-container">
+                <canvas id="runtimeChart"></canvas>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="intel">Cost per Benchmark Run ($)</h2>
+            <div class="chart-container">
+                <canvas id="costChart"></canvas>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="graviton">Full Comparison Table</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Configuration</th>
+                        <th>Architecture</th>
+                        <th>Runtime</th>
+                        <th>$/hr</th>
+                        <th>$/run</th>
+                        <th>Cache</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>32× r7i.2xlarge</strong></td>
+                        <td>Intel x86</td>
+                        <td class="faster">19.0 min ⚡</td>
+                        <td class="cheaper">$16.00</td>
+                        <td class="cheaper">$5.10 💰</td>
+                        <td>EBS</td>
+                    </tr>
+                    <tr>
+                        <td><strong>32× r7gd.2xlarge</strong></td>
+                        <td>Graviton ARM64</td>
+                        <td>22.8 min</td>
+                        <td>$19.35</td>
+                        <td>$7.34</td>
+                        <td>NVMe</td>
+                    </tr>
+                    <tr>
+                        <td><strong>16× r7i.4xlarge</strong></td>
+                        <td>Intel x86</td>
+                        <td>22.4 min</td>
+                        <td class="cheaper">$16.00</td>
+                        <td class="cheaper">$6.03</td>
+                        <td>EBS</td>
+                    </tr>
+                    <tr>
+                        <td><strong>16× r7gd.4xlarge</strong></td>
+                        <td>Graviton ARM64</td>
+                        <td>26.0 min</td>
+                        <td>$19.35</td>
+                        <td>$8.38</td>
+                        <td>NVMe</td>
+                    </tr>
+                    <tr>
+                        <td><strong>8× r7gd.8xlarge</strong></td>
+                        <td>Graviton ARM64</td>
+                        <td>33.5 min</td>
+                        <td>$19.35</td>
+                        <td>$10.82</td>
+                        <td>NVMe</td>
+                    </tr>
+                    <tr>
+                        <td><strong>8× r7i.24xlarge</strong></td>
+                        <td>Intel x86</td>
+                        <td class="faster">14.9 min ⚡</td>
+                        <td>$48.00</td>
+                        <td>$12.03</td>
+                        <td>EBS</td>
+                    </tr>
+                    <tr>
+                        <td><strong>4× r7gd.16xlarge</strong></td>
+                        <td>Graviton ARM64</td>
+                        <td>42.1 min</td>
+                        <td>$19.35</td>
+                        <td>$13.59</td>
+                        <td>NVMe</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2 class="intel">Key Insights</h2>
+            <div class="insights-grid">
+                <div class="insight-card intel">
+                    <div class="insight-title">🏆 Intel Wins on Speed & Cost</div>
+                    <div class="insight-text">
+                        r7i.2xlarge (32 nodes) completes TPC-H SF3000 in 19.0 min at $5.10/run — 
+                        17% faster and 30% cheaper than equivalent Graviton config.
+                    </div>
+                </div>
+                <div class="insight-card neutral">
+                    <div class="insight-title">🤔 AsyncDataCache Impact</div>
+                    <div class="insight-text">
+                        Despite NVMe caching, Graviton is slower. This suggests the TPC-H benchmark
+                        doesn't benefit from repeat reads, or x86 has better vectorization for Velox.
+                    </div>
+                </div>
+                <div class="insight-card graviton">
+                    <div class="insight-title">💾 Graviton Advantage: Storage</div>
+                    <div class="insight-text">
+                        r7gd includes free NVMe storage (474GB-1.9TB per node). For workloads with
+                        data reuse or spilling, this could offset the performance gap.
+                    </div>
+                </div>
+                <div class="insight-card intel">
+                    <div class="insight-title">💰 r7i Pricing Edge</div>
+                    <div class="insight-text">
+                        r7i hourly costs are ~17% lower than r7gd for equivalent configs. Combined
+                        with faster execution, total cost savings reach 30%.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="verdict-box">
+            <div class="verdict-title">📊 Verdict: Intel r7i for TPC-H SF3000</div>
+            <div class="verdict-text">
+                For single-pass analytical queries like TPC-H, <strong>Intel r7i delivers better price-performance</strong>.
+                The x86 architecture's mature vectorization in Velox outweighs Graviton's NVMe cache benefits
+                for this workload. However, for production workloads with <strong>repeated data access patterns</strong>
+                or <strong>spill-heavy queries</strong>, Graviton's included NVMe storage may prove valuable.
+            </div>
+        </div>
+
+        <footer>
+            <p>Generated: December 2024 | Presto Native with Velox | TPC-H SF3000 (3TB)</p>
+        </footer>
+    </div>
+
+    <script>
+        // Colors
+        const gravitonColor = '#76B900';
+        const intelColor = '#00D4FF';
+        const gravitonAlpha = 'rgba(118, 185, 0, 0.7)';
+        const intelAlpha = 'rgba(0, 212, 255, 0.7)';
+
+        Chart.defaults.color = '#9E9E9E';
+        Chart.defaults.borderColor = '#333';
+
+        // Runtime Chart
+        const runtimeCtx = document.getElementById('runtimeChart').getContext('2d');
+        new Chart(runtimeCtx, {
+            type: 'bar',
+            data: {
+                labels: ['32× 2xlarge', '16× 4xlarge', '8× 8xl/24xl', '4× 16xlarge'],
+                datasets: [
+                    {
+                        label: 'Graviton (r7gd)',
+                        data: [22.8, 26.0, 33.5, 42.1],
+                        backgroundColor: gravitonAlpha,
+                        borderColor: gravitonColor,
+                        borderWidth: 2,
+                        borderRadius: 6
+                    },
+                    {
+                        label: 'Intel (r7i)',
+                        data: [19.0, 22.4, 14.9, 32.9],
+                        backgroundColor: intelAlpha,
+                        borderColor: intelColor,
+                        borderWidth: 2,
+                        borderRadius: 6
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { padding: 20, usePointStyle: true }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Runtime (minutes)', color: '#76B900' },
+                        grid: { color: 'rgba(51, 51, 51, 0.5)' }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+
+        // Cost Chart
+        const costCtx = document.getElementById('costChart').getContext('2d');
+        new Chart(costCtx, {
+            type: 'bar',
+            data: {
+                labels: ['32× 2xlarge', '16× 4xlarge', '8× 8xl/24xl', '4× 16xlarge'],
+                datasets: [
+                    {
+                        label: 'Graviton (r7gd)',
+                        data: [7.34, 8.38, 10.82, 13.59],
+                        backgroundColor: gravitonAlpha,
+                        borderColor: gravitonColor,
+                        borderWidth: 2,
+                        borderRadius: 6
+                    },
+                    {
+                        label: 'Intel (r7i)',
+                        data: [5.10, 6.03, 12.03, 13.27],
+                        backgroundColor: intelAlpha,
+                        borderColor: intelColor,
+                        borderWidth: 2,
+                        borderRadius: 6
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { padding: 20, usePointStyle: true }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Cost per Run ($)', color: '#00D4FF' },
+                        grid: { color: 'rgba(51, 51, 51, 0.5)' }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+
