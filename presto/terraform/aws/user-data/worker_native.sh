@@ -173,24 +173,33 @@ if [ -z "$${TOTAL_RAM_GB}" ]; then
 fi
 
 # Native Worker Memory Configuration
-# Leave headroom for Presto overhead (memory tracking, buffers, system)
-# Larger instances need more absolute headroom
+# Optimized for maximum utilization while preventing OOM
+# Docker limit is set higher than Presto memory to allow native overhead
 
 if [ "$TOTAL_RAM_GB" -ge 480 ]; then
-  # 512GB instances: leave 50GB headroom
-  WORKER_MEMORY_GB=$((TOTAL_RAM_GB - 50))
+  # 512GB instances (r7gd.16xlarge): ~494GB available
+  # Docker: 98% of available, Presto: Docker - 15GB native overhead
+  DOCKER_MEM_LIMIT_GB=$((TOTAL_RAM_GB * 98 / 100))
+  WORKER_MEMORY_GB=$((DOCKER_MEM_LIMIT_GB - 15))
 elif [ "$TOTAL_RAM_GB" -ge 240 ]; then
-  # 256GB instances: leave 30GB headroom
-  WORKER_MEMORY_GB=$((TOTAL_RAM_GB - 30))
+  # 256GB instances (r7gd.8xlarge): ~240GB available
+  # Docker: 98% of available, Presto: Docker - 12GB native overhead
+  DOCKER_MEM_LIMIT_GB=$((TOTAL_RAM_GB * 98 / 100))
+  WORKER_MEMORY_GB=$((DOCKER_MEM_LIMIT_GB - 12))
 elif [ "$TOTAL_RAM_GB" -ge 120 ]; then
-  # 128GB instances: leave 15GB headroom
-  WORKER_MEMORY_GB=$((TOTAL_RAM_GB - 15))
+  # 128GB instances (r7gd.4xlarge): ~120GB available
+  # Docker: 97% of available, Presto: Docker - 7GB native overhead
+  DOCKER_MEM_LIMIT_GB=$((TOTAL_RAM_GB * 97 / 100))
+  WORKER_MEMORY_GB=$((DOCKER_MEM_LIMIT_GB - 7))
 elif [ "$TOTAL_RAM_GB" -ge 60 ]; then
-  # 64GB instances: cap at 54GB for Q21 safety
+  # 64GB instances (r7gd.2xlarge): ~60GB available
+  # Conservative for Q21 hash table requirements
+  DOCKER_MEM_LIMIT_GB=58
   WORKER_MEMORY_GB=54
 else
-  # Smaller instances: use 80%
-  WORKER_MEMORY_GB=$((TOTAL_RAM_GB * 80 / 100))
+  # Smaller instances: 95% Docker, 90% Presto
+  DOCKER_MEM_LIMIT_GB=$((TOTAL_RAM_GB * 95 / 100))
+  WORKER_MEMORY_GB=$((TOTAL_RAM_GB * 90 / 100))
 fi
 
 # Scale factor for configuration tuning
@@ -261,8 +270,9 @@ echo "=================================================="
 echo "Instance: $${TOTAL_RAM_GB}GB RAM, $${VCPUS} vCPUs"
 echo "Scale Factor: SF$${SCALE_FACTOR}"
 echo "--------------------------------------------------"
-echo "System Reserved: $${SYSTEM_RESERVED_GB}GB"
-echo "Worker Memory: $${WORKER_MEMORY_GB}GB (95% of usable)"
+echo "Docker Memory Limit: $${DOCKER_MEM_LIMIT_GB}GB"
+echo "Presto Memory: $${WORKER_MEMORY_GB}GB"
+echo "Native Overhead: $((DOCKER_MEM_LIMIT_GB - WORKER_MEMORY_GB))GB"
 echo "Buffer Memory: $${BUFFER_MEM_GB}GB"
 echo "Task Concurrency: $${TASK_CONCURRENCY}"
 echo "AsyncDataCache: $${CACHE_SIZE_GB}GB (SSD cache for S3)"
@@ -404,8 +414,8 @@ ExecStartPre=-/usr/bin/docker rm presto-worker
 ExecStart=/usr/bin/docker run --rm \\
   --name presto-worker \\
   --network host \\
-  --memory=$${WORKER_MEMORY_GB}g \\
-  --memory-swap=$${WORKER_MEMORY_GB}g \\
+  --memory=$${DOCKER_MEM_LIMIT_GB}g \\
+  --memory-swap=$${DOCKER_MEM_LIMIT_GB}g \\
   -v /opt/presto/etc:/opt/presto-server/etc:ro \\
   -v /var/presto/data:/var/presto/data \\
   -v /var/presto/catalog:/var/presto/catalog \\

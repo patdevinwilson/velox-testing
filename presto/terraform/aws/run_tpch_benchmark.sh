@@ -77,32 +77,35 @@ update_cluster_credentials() {
             # Get vCPU count for concurrency
             VCPUS=\$(nproc)
             
-            # Memory allocation based on instance RAM:
-            # - Use 95% of RAM for large instances, less for smaller
-            # - Concurrency matches vCPU count
+            # Memory allocation optimized for maximum instance utilization
+            # Docker limit > Presto memory to allow native overhead
+            # Concurrency matches vCPU count
             if [ \"\$TOTAL_RAM_GB\" -ge 480 ]; then
-                # 512GB instances (r7gd.16xlarge): 95% Docker, leave 50GB headroom for Presto
-                DOCKER_MEM=\$((TOTAL_RAM_GB * 95 / 100))
-                PRESTO_MEM=\$((DOCKER_MEM - 50))
-                CONCURRENCY=\$VCPUS
-            elif [ \"\$TOTAL_RAM_GB\" -ge 240 ]; then
-                # 256GB instances (r7gd.8xlarge): 90% Docker, leave 30GB headroom
-                DOCKER_MEM=\$((TOTAL_RAM_GB * 90 / 100))
-                PRESTO_MEM=\$((DOCKER_MEM - 30))
-                CONCURRENCY=\$VCPUS
-            elif [ \"\$TOTAL_RAM_GB\" -ge 120 ]; then
-                # 128GB instances (r7gd.4xlarge): 85% Docker, leave 15GB headroom
-                DOCKER_MEM=\$((TOTAL_RAM_GB * 85 / 100))
+                # 512GB instances (r7gd.16xlarge): ~494GB available
+                # Docker: 98%, Presto: Docker - 15GB native overhead
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 98 / 100))
                 PRESTO_MEM=\$((DOCKER_MEM - 15))
                 CONCURRENCY=\$VCPUS
+            elif [ \"\$TOTAL_RAM_GB\" -ge 240 ]; then
+                # 256GB instances (r7gd.8xlarge): ~240GB available
+                # Docker: 98%, Presto: Docker - 12GB native overhead
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 98 / 100))
+                PRESTO_MEM=\$((DOCKER_MEM - 12))
+                CONCURRENCY=\$VCPUS
+            elif [ \"\$TOTAL_RAM_GB\" -ge 120 ]; then
+                # 128GB instances (r7gd.4xlarge): ~120GB available
+                # Docker: 97%, Presto: Docker - 7GB native overhead
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 97 / 100))
+                PRESTO_MEM=\$((DOCKER_MEM - 7))
+                CONCURRENCY=\$VCPUS
             elif [ \"\$TOTAL_RAM_GB\" -ge 60 ]; then
-                # 64GB instances (r7gd.2xlarge): cap at 54GB for Q21
+                # 64GB instances (r7gd.2xlarge): conservative for Q21
                 DOCKER_MEM=58
                 PRESTO_MEM=54
                 CONCURRENCY=\$VCPUS
             else
-                # Smaller instances: use 80%
-                DOCKER_MEM=\$((TOTAL_RAM_GB * 80 / 100))
+                # Smaller instances: 95% Docker, 90% Presto
+                DOCKER_MEM=\$((TOTAL_RAM_GB * 95 / 100))
                 PRESTO_MEM=\$((DOCKER_MEM - 4))
                 CONCURRENCY=\$((VCPUS > 8 ? VCPUS : 8))
             fi

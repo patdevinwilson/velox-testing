@@ -1,0 +1,96 @@
+{
+  "benchmark": {
+    "name": "TPC-H SF3000",
+    "scale_factor": 3000,
+    "data_size_tb": 3,
+    "queries": 22,
+    "all_passed": true,
+    "total_runtime_seconds": 2012,
+    "date": "2024-12-01"
+  },
+  "cluster": {
+    "coordinator": {
+      "instance_type": "r7gd.8xlarge",
+      "count": 1,
+      "arch": "arm64"
+    },
+    "workers": {
+      "instance_type": "r7gd.8xlarge",
+      "count": 8,
+      "arch": "arm64",
+      "image": "s3://rapids-db-io-us-east-1/docker-images/presto-worker-arm64-latest.tar.gz",
+      "specs": {
+        "vcpus": 32,
+        "memory_gb": 256,
+        "nvme_storage_gb": 950
+      }
+    }
+  },
+  "worker_config": {
+    "memory": {
+      "instance_ram_gb": 247,
+      "docker_memory_limit_gb": 242,
+      "presto_memory_gb": 230,
+      "native_overhead_gb": 12,
+      "memory_pool_abort_capacity_limit": "184GB",
+      "notes": "98% Docker utilization, 12GB native overhead - Q21 passes"
+    },
+    "concurrency": {
+      "task_concurrency": 32,
+      "task_max_worker_threads": 32,
+      "task_max_drivers_per_task": 32,
+      "notes": "Match vCPU count for optimal parallelization"
+    },
+    "memory_arbitrator": {
+      "memory_arbitrator_kind": "SHARED",
+      "global_arbitration_enabled": true,
+      "notes": "Global arbitration helps manage memory across concurrent tasks"
+    },
+    "cache": {
+      "async_data_cache_enabled": true,
+      "async_cache_ssd_gb": 760,
+      "async_cache_ssd_path": "/var/presto/cache",
+      "notes": "Uses NVMe instance storage (~950GB per node)"
+    }
+  },
+  "coordinator_config": {
+    "memory": {
+      "query_max_memory": "1840GB",
+      "query_max_total_memory": "1840GB",
+      "notes": "8 workers × 230GB = 1840GB total"
+    }
+  },
+  "performance_notes": {
+    "q21_status": "PASSED",
+    "q21_runtime_seconds": 283.75,
+    "q21_note": "Q21 passes with optimized memory (230GB per worker vs 186GB before)",
+    "optimization": "98% Docker utilization with 12GB native overhead enables Q21 success",
+    "scaling": "8 workers is the minimum for SF3000 with optimized memory settings",
+    "recommendation": "Viable for SF3000 - all 22 queries pass with optimized memory"
+  },
+  "query_results": {
+    "Q1": {"status": "success", "runtime_seconds": 86.05},
+    "Q2": {"status": "success", "runtime_seconds": 30.46},
+    "Q3": {"status": "success", "runtime_seconds": 99.48},
+    "Q4": {"status": "success", "runtime_seconds": 90.37},
+    "Q5": {"status": "success", "runtime_seconds": 115.61},
+    "Q6": {"status": "success", "runtime_seconds": 54.11},
+    "Q7": {"status": "success", "runtime_seconds": 87.40},
+    "Q8": {"status": "success", "runtime_seconds": 90.69},
+    "Q9": {"status": "success", "runtime_seconds": 146.63},
+    "Q10": {"status": "success", "runtime_seconds": 93.20},
+    "Q11": {"status": "success", "runtime_seconds": 20.35},
+    "Q12": {"status": "success", "runtime_seconds": 76.43},
+    "Q13": {"status": "success", "runtime_seconds": 56.90},
+    "Q14": {"status": "success", "runtime_seconds": 63.77},
+    "Q15": {"status": "success", "runtime_seconds": 95.61},
+    "Q16": {"status": "success", "runtime_seconds": 16.73},
+    "Q17": {"status": "success", "runtime_seconds": 119.35},
+    "Q18": {"status": "success", "runtime_seconds": 190.66},
+    "Q19": {"status": "success", "runtime_seconds": 63.88},
+    "Q20": {"status": "success", "runtime_seconds": 87.45},
+    "Q21": {"status": "success", "runtime_seconds": 283.75},
+    "Q22": {"status": "success", "runtime_seconds": 23.33}
+  }
+}
+

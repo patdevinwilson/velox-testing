@@ -1,0 +1,94 @@
+{
+  "benchmark": {
+    "name": "TPC-H SF3000",
+    "scale_factor": 3000,
+    "data_size_tb": 3,
+    "queries": 22,
+    "all_passed": true,
+    "total_runtime_seconds": 1556,
+    "date": "2024-12-01"
+  },
+  "cluster": {
+    "coordinator": {
+      "instance_type": "r7gd.4xlarge",
+      "count": 1,
+      "arch": "arm64"
+    },
+    "workers": {
+      "instance_type": "r7gd.4xlarge",
+      "count": 16,
+      "arch": "arm64",
+      "image": "s3://rapids-db-io-us-east-1/docker-images/presto-worker-arm64-latest.tar.gz",
+      "specs": {
+        "vcpus": 16,
+        "memory_gb": 128,
+        "nvme_storage_gb": 475
+      }
+    }
+  },
+  "worker_config": {
+    "memory": {
+      "instance_ram_gb": 120,
+      "docker_memory_limit_gb": 116,
+      "presto_memory_gb": 109,
+      "native_overhead_gb": 7,
+      "memory_pool_abort_capacity_limit": "87GB",
+      "notes": "97% Docker utilization, 7GB native overhead"
+    },
+    "concurrency": {
+      "task_concurrency": 16,
+      "task_max_worker_threads": 16,
+      "task_max_drivers_per_task": 16,
+      "notes": "Match vCPU count for optimal parallelization"
+    },
+    "memory_arbitrator": {
+      "memory_arbitrator_kind": "SHARED",
+      "global_arbitration_enabled": true,
+      "notes": "Global arbitration helps manage memory across concurrent tasks"
+    },
+    "cache": {
+      "async_data_cache_enabled": true,
+      "async_cache_ssd_gb": 380,
+      "async_cache_ssd_path": "/var/presto/cache",
+      "notes": "Uses NVMe instance storage (~475GB per node)"
+    }
+  },
+  "coordinator_config": {
+    "memory": {
+      "query_max_memory": "1744GB",
+      "query_max_total_memory": "1744GB",
+      "notes": "16 workers × 109GB = 1744GB total"
+    }
+  },
+  "performance_notes": {
+    "q21_runtime_seconds": 203.6,
+    "q21_note": "Q21 completes successfully - 16 workers provide enough parallelization",
+    "scaling": "Good balance of parallelization and per-node resources",
+    "recommendation": "Reliable configuration for SF3000 with all queries passing"
+  },
+  "query_results": {
+    "Q1": {"status": "success", "runtime_seconds": 50.07},
+    "Q2": {"status": "success", "runtime_seconds": 25.03},
+    "Q3": {"status": "success", "runtime_seconds": 72.56},
+    "Q4": {"status": "success", "runtime_seconds": 71.16},
+    "Q5": {"status": "success", "runtime_seconds": 96.15},
+    "Q6": {"status": "success", "runtime_seconds": 45.58},
+    "Q7": {"status": "success", "runtime_seconds": 80.79},
+    "Q8": {"status": "success", "runtime_seconds": 74.55},
+    "Q9": {"status": "success", "runtime_seconds": 104.34},
+    "Q10": {"status": "success", "runtime_seconds": 78.22},
+    "Q11": {"status": "success", "runtime_seconds": 17.93},
+    "Q12": {"status": "success", "runtime_seconds": 70.63},
+    "Q13": {"status": "success", "runtime_seconds": 40.48},
+    "Q14": {"status": "success", "runtime_seconds": 61.14},
+    "Q15": {"status": "success", "runtime_seconds": 76.57},
+    "Q16": {"status": "success", "runtime_seconds": 14.65},
+    "Q17": {"status": "success", "runtime_seconds": 114.98},
+    "Q18": {"status": "success", "runtime_seconds": 113.12},
+    "Q19": {"status": "success", "runtime_seconds": 53.42},
+    "Q20": {"status": "success", "runtime_seconds": 74.49},
+    "Q21": {"status": "success", "runtime_seconds": 203.63},
+    "Q22": {"status": "success", "runtime_seconds": 16.51}
+  }
+}
+

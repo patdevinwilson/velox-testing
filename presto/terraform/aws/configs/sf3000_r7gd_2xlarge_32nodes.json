@@ -29,14 +29,12 @@
   },
   "worker_config": {
     "memory": {
-      "system_memory_gb": 54,
-      "query_memory_gb": 54,
-      "query_max_memory_per_node": "54GB",
-      "query_max_total_memory_per_node": "54GB",
-      "system_mem_limit_gb": 54,
-      "system_mem_shrink_gb": 20,
+      "instance_ram_gb": 60,
       "docker_memory_limit_gb": 58,
-      "notes": "Reduced from 64GB total to 54GB usable to prevent OOM on Q21"
+      "presto_memory_gb": 54,
+      "native_overhead_gb": 4,
+      "memory_pool_abort_capacity_limit": "40GB",
+      "notes": "Conservative for Q21 hash table requirements"
     },
     "concurrency": {
       "task_concurrency": 8,
