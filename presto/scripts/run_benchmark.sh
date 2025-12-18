@@ -219,5 +219,8 @@ source ./common_functions.sh
 
 wait_for_worker_node_registration "$HOST_NAME" "$PORT"
 
+# Export PRESTO_DATA_DIR for pytest
+export PRESTO_DATA_DIR="${PRESTO_DATA_DIR:-/datasets/tpch-parquet-float}"
+
 BENCHMARK_TEST_DIR=${TEST_DIR}/performance_benchmarks
 pytest -q ${BENCHMARK_TEST_DIR}/${BENCHMARK_TYPE}_test.py ${PYTEST_ARGS[*]}
